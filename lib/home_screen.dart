@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:skribbl_clone/create_room_screen.dart';
+import 'package:skribbl_clone/join_room_screen.dart';
 
 class HomeScreen extends StatefulWidget {
   const HomeScreen({super.key});
@@ -40,7 +41,12 @@ class _HomeScreenState extends State<HomeScreen> {
               ),
 
               ElevatedButton(
-                onPressed: () {},
+                onPressed: () {
+                  Navigator.push(
+                    context,
+                    MaterialPageRoute(builder: (context) => JoinRoomScreen()),
+                  );
+                },
                 style: ElevatedButton.styleFrom(backgroundColor: Colors.blue),
                 child: Text("Join", style: TextStyle(color: Colors.white)),
               ),
