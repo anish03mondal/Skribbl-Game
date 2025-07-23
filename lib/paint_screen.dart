@@ -3,7 +3,9 @@ import 'package:flutter/material.dart';
 import 'package:socket_io_client/socket_io_client.dart' as IO;
 
 class PaintScreen extends StatefulWidget {
-  const PaintScreen({super.key});
+  final Map data;
+  final String screenFrom;
+  const PaintScreen({super.key, required this.data, required this.screenFrom});
 
   @override
   State<PaintScreen> createState() => _PaintScreenState();
@@ -15,6 +17,7 @@ class _PaintScreenState extends State<PaintScreen> {
   void initState() {
     super.initState();
     connect();
+    print(widget.data);
   }
 
   //Socket io client connection
@@ -33,6 +36,7 @@ class _PaintScreenState extends State<PaintScreen> {
     //listen to socket
     _socket.onConnect((data) {
       print('Connected');
+      
     });
   }
 

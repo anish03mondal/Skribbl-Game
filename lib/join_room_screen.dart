@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:skribbl_clone/widgets/custom_text_field.dart';
 
 class JoinRoomScreen extends StatefulWidget {
+  
   const JoinRoomScreen({super.key});
 
   @override
