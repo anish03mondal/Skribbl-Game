@@ -2,6 +2,7 @@ const express = require('express');
 var http = require('http');
 var app = express();
 const port = process.env.port || 3000;
+//This line creates an HTTP server in Node.js using the http module, and uses an Express app (app) to handle requests.
 var server = http.createServer(app);
 const mongoose = require('mongoose');
 
