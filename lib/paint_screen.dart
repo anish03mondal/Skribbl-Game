@@ -33,10 +33,13 @@ class _PaintScreenState extends State<PaintScreen> {
     //Manually starts the connection to the Socket.IO server.
     _socket.connect();
 
+    if (widget.screenFrom == 'createRoom') {
+      _socket.emit('create-game', widget.data);
+    }
+
     //listen to socket
     _socket.onConnect((data) {
       print('Connected');
-      
     });
   }
 

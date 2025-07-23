@@ -1,5 +1,4 @@
 import 'package:flutter/material.dart';
-import 'package:skribbl_clone/join_room_screen.dart';
 import 'package:skribbl_clone/paint_screen.dart';
 import 'package:skribbl_clone/widgets/custom_text_field.dart';
 
