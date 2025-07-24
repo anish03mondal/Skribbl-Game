@@ -22,7 +22,7 @@ class _CreateRoomScreenState extends State<CreateRoomScreen> {
         _roomSizeValue != null) {
       Map data = {
         "nickname": _nameController.text,
-        "name": _roomNameController,
+        "name": _roomNameController.text,
         "occupancy": _maxRoundsValue,
         "maxRounds": _roomSizeValue,
       };

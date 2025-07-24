@@ -13,6 +13,7 @@ class PaintScreen extends StatefulWidget {
 
 class _PaintScreenState extends State<PaintScreen> {
   late IO.Socket _socket;
+  String dataOfRoom = "";
   @override
   void initState() {
     super.initState();
@@ -40,11 +41,23 @@ class _PaintScreenState extends State<PaintScreen> {
     //listen to socket
     _socket.onConnect((data) {
       print('Connected');
+      _socket.on('updateRoom', (roomData) {
+        //update or rebuild of ui
+        setState(() {
+          dataOfRoom = roomData;
+        });
+        if(roomData['isJoin'] != true)
+        {
+          //start the timer
+        }
+      });
     });
   }
 
   @override
   Widget build(BuildContext context) {
-    return const Placeholder();
+    return Scaffold(
+      body: Container(),
+    );
   }
 }

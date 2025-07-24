@@ -55,7 +55,7 @@ io.on('connection', (socket) => {
             room.players.push(player);
             room = await room.save();
             socket.join(room);
-            io.to(name).emit('updateRoom', Room);
+            io.to(name).emit('updateRoom', room);
             
         } catch (err) {
             console.log(err);
