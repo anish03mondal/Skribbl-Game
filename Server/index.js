@@ -31,6 +31,7 @@ mongoose.connect(DB).then(()=> {
 
 io.on('connection', (socket) => {
     console.log('Connected');
+    // create game callback
     socket.on('create-game', async({nickname, name, occupancy, maxRounds}) => {
         try {
             const existingRoom = await Room.findOne({name});
@@ -54,12 +55,50 @@ io.on('connection', (socket) => {
             }
             room.players.push(player);
             room = await room.save();
-            socket.join(room);
+            socket.join(name);
             io.to(name).emit('updateRoom', room);
             
         } catch (err) {
             console.log(err);
             
+        }
+    })
+
+    //join game call back
+    socket.on('join-game', async ({nickname, name}) => {
+        try{
+            let room = await Room.findOne({name});
+            if(!room)
+            {
+                socket.emit('notCorrectGame', 'Please enter a valid room name');
+                return;
+            }
+            
+            if(room.isJoin)
+            {
+                let player = {
+                    socketID : socket.id,
+                    nickname,
+                }
+                room.players.push(player);
+                socket.join(name);
+
+                if(room.players.length === room.occupancy)
+                {
+                    room.isJoin = false;
+                }
+                room.turn = room.players[room.turnIndex];
+                room = await room.save();
+                io.to(name).emit('updateRoom', room);
+            }
+            else
+            {
+                socket.emit('notCorrectGame', 'The game is in progress, please try again later');
+            }
+        }
+        catch(err)
+        {
+            console.log(err);
         }
     })
 })

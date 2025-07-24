@@ -20,11 +20,11 @@ class _CreateRoomScreenState extends State<CreateRoomScreen> {
         _roomNameController.text.isNotEmpty &&
         _maxRoundsValue != null &&
         _roomSizeValue != null) {
-      Map data = {
+      Map<String, String> data = {
         "nickname": _nameController.text,
         "name": _roomNameController.text,
-        "occupancy": _maxRoundsValue,
-        "maxRounds": _roomSizeValue,
+        "occupancy": _maxRoundsValue!,
+        "maxRounds": _roomSizeValue!,
       };
       Navigator.push(
         context,
