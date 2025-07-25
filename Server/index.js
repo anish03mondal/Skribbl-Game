@@ -101,6 +101,11 @@ io.on('connection', (socket) => {
             console.log(err);
         }
     })
+
+    //White board socket
+    socket.on('paint', ({details, roomName}) => {
+        io.to(roomName).emit('points', {details: details});
+    })
 })
 
 server.listen(port, "0.0.0.0", () => {

@@ -17,6 +17,10 @@ class _PaintScreenState extends State<PaintScreen> {
   late IO.Socket _socket;
   Map dataOfRoom = {};
   List<TouchPoints> points = [];
+  StrokeCap strokeType = StrokeCap.round;
+  Color selectedColors = Colors.black;
+  double opacity = 1;
+  double strokeWidth = 2;
   @override
   void initState() {
     super.initState();
@@ -55,6 +59,25 @@ class _PaintScreenState extends State<PaintScreen> {
           //start the timer
         }
       });
+
+      _socket.on('points', (point) {
+        if (point['details'] != null) {
+          setState(() {
+            points.add(
+              TouchPoints(
+                points: Offset(
+                  (point['details']['dx']).toDouble(),
+                  (point['details']['dy']).toDouble(),
+                ),
+                paint: Paint()..strokeCap = strokeType
+                ..isAntiAlias = true
+                ..color = selectedColors.withOpacity(opacity)
+                ..strokeWidth = strokeWidth
+              ),
+            );
+          });
+        }
+      });
     });
   }
 
@@ -75,7 +98,7 @@ class _PaintScreenState extends State<PaintScreen> {
                 child: GestureDetector(
                   //onPanUpdate: Called as the user moves their finger (used for drawing).
                   onPanUpdate: (details) {
-                     print(details.localPosition.dx);
+                    print(details.localPosition.dx);
                     _socket.emit('paint', {
                       'details': {
                         'dx': details.localPosition.dx,
@@ -96,7 +119,12 @@ class _PaintScreenState extends State<PaintScreen> {
                     });
                   },
                   //onPanEnd: Called when the user lifts their finger.
-                  onPanEnd: (details) {},
+                  onPanEnd: (details) {
+                    _socket.emit('paint', {
+                      'details': null,
+                      'roomName': widget.data['name'],
+                    });
+                  },
                   child: SizedBox.expand(
                     child: ClipRRect(
                       borderRadius: BorderRadius.all(Radius.circular(20)),
