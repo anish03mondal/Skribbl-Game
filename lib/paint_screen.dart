@@ -1,4 +1,6 @@
 import 'package:flutter/material.dart';
+import 'package:skribbl_clone/models/my_custom_painter.dart';
+import 'package:skribbl_clone/models/touch_points.dart';
 // as IO is giving nickname to the package
 import 'package:socket_io_client/socket_io_client.dart' as IO;
 
@@ -13,7 +15,8 @@ class PaintScreen extends StatefulWidget {
 
 class _PaintScreenState extends State<PaintScreen> {
   late IO.Socket _socket;
-  String dataOfRoom = "";
+  Map dataOfRoom = {};
+  List<TouchPoints> points = [];
   @override
   void initState() {
     super.initState();
@@ -57,6 +60,60 @@ class _PaintScreenState extends State<PaintScreen> {
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(body: Container());
+    final width = MediaQuery.of(context).size.width;
+    final height = MediaQuery.of(context).size.height;
+    return Scaffold(
+      body: Stack(
+        children: [
+          Column(
+            crossAxisAlignment: CrossAxisAlignment.center,
+            mainAxisAlignment: MainAxisAlignment.start,
+            children: [
+              Container(
+                width: width,
+                height: height * 0.55,
+                child: GestureDetector(
+                  //onPanUpdate: Called as the user moves their finger (used for drawing).
+                  onPanUpdate: (details) {
+                     print(details.localPosition.dx);
+                    _socket.emit('paint', {
+                      'details': {
+                        'dx': details.localPosition.dx,
+                        'dy': details.localPosition.dy,
+                      },
+                      'roomName': widget.data['name'],
+                    });
+                  },
+                  //onPanStart: Called when user starts touching the screen.
+                  onPanStart: (details) {
+                    print(details.localPosition.dx);
+                    _socket.emit('paint', {
+                      'details': {
+                        'dx': details.localPosition.dx,
+                        'dy': details.localPosition.dy,
+                      },
+                      'roomName': widget.data['name'],
+                    });
+                  },
+                  //onPanEnd: Called when the user lifts their finger.
+                  onPanEnd: (details) {},
+                  child: SizedBox.expand(
+                    child: ClipRRect(
+                      borderRadius: BorderRadius.all(Radius.circular(20)),
+                      child: RepaintBoundary(
+                        child: CustomPaint(
+                          size: Size.infinite,
+                          painter: MyCustomPainter(pointLists: points),
+                        ),
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ],
+      ),
+    );
   }
 }
