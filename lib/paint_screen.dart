@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_colorpicker/flutter_colorpicker.dart';
 import 'package:skribbl_clone/models/my_custom_painter.dart';
 import 'package:skribbl_clone/models/touch_points.dart';
 // as IO is giving nickname to the package
@@ -69,10 +70,11 @@ class _PaintScreenState extends State<PaintScreen> {
                   (point['details']['dx']).toDouble(),
                   (point['details']['dy']).toDouble(),
                 ),
-                paint: Paint()..strokeCap = strokeType
-                ..isAntiAlias = true
-                ..color = selectedColors.withOpacity(opacity)
-                ..strokeWidth = strokeWidth
+                paint: Paint()
+                  ..strokeCap = strokeType
+                  ..isAntiAlias = true
+                  ..color = selectedColors.withOpacity(opacity)
+                  ..strokeWidth = strokeWidth,
               ),
             );
           });
@@ -85,6 +87,35 @@ class _PaintScreenState extends State<PaintScreen> {
   Widget build(BuildContext context) {
     final width = MediaQuery.of(context).size.width;
     final height = MediaQuery.of(context).size.height;
+
+    void selectColor() {
+      showDialog(
+        context: context,
+        builder: (context) => AlertDialog(
+          title: Text('Choose color'),
+          content: SingleChildScrollView(
+            child: BlockPicker(
+              pickerColor: selectedColors,
+              onColorChanged: (color) {
+                String colorString = color.toHexString();
+                //only extract the hex part of colorString
+                  String valueString = color.value.toRadixString(16).padLeft(8, '0').substring(2);
+
+                print(colorString);
+                print(valueString);
+
+                Map map = {
+                  'color': valueString,
+                  'roomName': dataOfRoom['name'],
+                };
+                _socket.emit('color-change', map);
+              },
+            ),
+          ),
+        ),
+      );
+    }
+
     return Scaffold(
       body: Stack(
         children: [
@@ -92,7 +123,7 @@ class _PaintScreenState extends State<PaintScreen> {
             crossAxisAlignment: CrossAxisAlignment.center,
             mainAxisAlignment: MainAxisAlignment.start,
             children: [
-              Container(
+              SizedBox(
                 width: width,
                 height: height * 0.55,
                 child: GestureDetector(
@@ -137,6 +168,33 @@ class _PaintScreenState extends State<PaintScreen> {
                     ),
                   ),
                 ),
+              ),
+            ],
+          ),
+          Row(
+            children: [
+              //To select the color
+              IconButton(
+                icon: Icon(Icons.color_lens, color: selectedColors),
+                onPressed: () {
+                  selectColor();
+                },
+              ),
+              Expanded(
+                //to change the value of stroke width
+                child: Slider(
+                  min: 1.0,
+                  max: 10.0,
+                  label: "strokeWidth $strokeWidth",
+                  activeColor: selectedColors,
+                  value: strokeWidth,
+                  onChanged: (double value) {},
+                ),
+              ),
+              //To clear the screen
+              IconButton(
+                icon: Icon(Icons.layers_clear, color: selectedColors),
+                onPressed: () {},
               ),
             ],
           ),
