@@ -19,27 +19,13 @@ class MyCustomPainter extends CustomPainter {
     //if there is line we need to connect the points
 
     for (int i = 0; i < pointLists.length - 1; i++) {
-      if (pointLists[i + 1] != null) {
-        //This is a line
-        canvas.drawLine(
-          pointLists[i].points,
-          pointLists[i + 1].points,
-          pointLists[i].paint,
-        );
-      } else if (pointLists[i + 1] == null) {
-        //This is a point
-        offsetPoints.clear();
-        offsetPoints.add(pointLists[i].points);
-        offsetPoints.add(
-          Offset(pointLists[i].points.dx + 0.1, pointLists[i].points.dy + 0.1),
-        );
-        canvas.drawPoints(
-          ui.PointMode.points,
-          offsetPoints,
-          pointLists[i].paint,
-        );
-      }
-    }
+      //This is a line
+      canvas.drawLine(
+        pointLists[i].points,
+        pointLists[i + 1].points,
+        pointLists[i].paint,
+      );
+        }
   }
 
   @override

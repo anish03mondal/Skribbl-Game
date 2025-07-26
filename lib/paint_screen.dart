@@ -80,6 +80,14 @@ class _PaintScreenState extends State<PaintScreen> {
           });
         }
       });
+
+      _socket.on('color-change', (colorString) {
+        int value = int.parse(colorString, radix: 16);
+        Color otherColor = Color(value);
+        setState(() {
+          selectedColors = otherColor;
+        });
+      });
     });
   }
 
@@ -99,7 +107,10 @@ class _PaintScreenState extends State<PaintScreen> {
               onColorChanged: (color) {
                 String colorString = color.toHexString();
                 //only extract the hex part of colorString
-                  String valueString = color.value.toRadixString(16).padLeft(8, '0').substring(2);
+                String valueString = color.value
+                    .toRadixString(16)
+                    .padLeft(8, '0')
+                    .substring(2);
 
                 print(colorString);
                 print(valueString);
@@ -112,6 +123,14 @@ class _PaintScreenState extends State<PaintScreen> {
               },
             ),
           ),
+          actions: [
+            TextButton(
+              onPressed: () {
+                Navigator.of(context).pop();
+              },
+              child: Text('Close'),
+            ),
+          ],
         ),
       );
     }
@@ -171,32 +190,37 @@ class _PaintScreenState extends State<PaintScreen> {
               ),
             ],
           ),
-          Row(
-            children: [
-              //To select the color
-              IconButton(
-                icon: Icon(Icons.color_lens, color: selectedColors),
-                onPressed: () {
-                  selectColor();
-                },
-              ),
-              Expanded(
-                //to change the value of stroke width
-                child: Slider(
-                  min: 1.0,
-                  max: 10.0,
-                  label: "strokeWidth $strokeWidth",
-                  activeColor: selectedColors,
-                  value: strokeWidth,
-                  onChanged: (double value) {},
+          Positioned(
+            top: MediaQuery.of(context).size.height * 0.55 + 16, // canvas height + margin
+            left: 16,
+            right: 16,
+            child: Row(
+              children: [
+                //To select the color
+                IconButton(
+                  icon: Icon(Icons.color_lens, color: selectedColors),
+                  onPressed: () {
+                    selectColor();
+                  },
                 ),
-              ),
-              //To clear the screen
-              IconButton(
-                icon: Icon(Icons.layers_clear, color: selectedColors),
-                onPressed: () {},
-              ),
-            ],
+                Expanded(
+                  //to change the value of stroke width
+                  child: Slider(
+                    min: 1.0,
+                    max: 10.0,
+                    label: "strokeWidth $strokeWidth",
+                    activeColor: selectedColors,
+                    value: strokeWidth,
+                    onChanged: (double value) {},
+                  ),
+                ),
+                //To clear the screen
+                IconButton(
+                  icon: Icon(Icons.layers_clear, color: selectedColors),
+                  onPressed: () {},
+                ),
+              ],
+            ),
           ),
         ],
       ),
