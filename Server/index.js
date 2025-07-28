@@ -121,6 +121,20 @@ io.on('connection', (socket) => {
     socket.on('clean-screen', (roomName) => {
         io.to(roomName).emit('clear-screen', '');
     })
+
+    //message
+    socket.on('msg', async(data) => {
+        try {
+            io.to(data.roomName).emit('msg', {
+                username: data.username,
+                msg: data.msg,
+            })
+        }
+        catch(err)
+        {
+            console.log(err.toString());
+        }
+    })
 })
 
 server.listen(port, "0.0.0.0", () => {
