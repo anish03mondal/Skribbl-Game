@@ -22,11 +22,32 @@ class _PaintScreenState extends State<PaintScreen> {
   Color selectedColors = Colors.black;
   double opacity = 1;
   double strokeWidth = 2;
+  List<Widget> textBlankWidget = [];
+  ScrollController _scrollController = ScrollController();
+  List<Map> messaages = [];
+  TextEditingController controller = TextEditingController();
+
   @override
   void initState() {
     super.initState();
     connect();
     print(widget.data);
+  }
+
+  void renderTextBlank(String text) {
+    textBlankWidget.clear();
+    for (int i = 0; i < text.length; i++) {
+      textBlankWidget.add(
+        Text(
+          '_',
+          style: TextStyle(
+            fontSize: 30,
+            color: Colors.black,
+            fontWeight: FontWeight.bold,
+          ),
+        ),
+      );
+    }
   }
 
   //Socket io client connection
@@ -53,7 +74,9 @@ class _PaintScreenState extends State<PaintScreen> {
       print('Connected');
       _socket.on('updateRoom', (roomData) {
         //update or rebuild of ui
+        print(roomData['word']);
         setState(() {
+          renderTextBlank(roomData['word']);
           dataOfRoom = roomData;
         });
         if (roomData['isJoin'] != true) {
@@ -148,108 +171,155 @@ class _PaintScreenState extends State<PaintScreen> {
     }
 
     return Scaffold(
-      backgroundColor: Colors.white,
-      body: Stack(
-        children: [
-          Column(
-            crossAxisAlignment: CrossAxisAlignment.center,
-            mainAxisAlignment: MainAxisAlignment.start,
-            children: [
-              SizedBox(
-                width: width,
-                height: height * 0.55,
-                child: GestureDetector(
-                  //onPanUpdate: Called as the user moves their finger (used for drawing).
-                  onPanUpdate: (details) {
-                    print(details.localPosition.dx);
-                    _socket.emit('paint', {
-                      'details': {
-                        'dx': details.localPosition.dx,
-                        'dy': details.localPosition.dy,
-                      },
-                      'roomName': widget.data['name'],
-                    });
-                  },
-                  //onPanStart: Called when user starts touching the screen.
-                  onPanStart: (details) {
-                    print(details.localPosition.dx);
-                    _socket.emit('paint', {
-                      'details': {
-                        'dx': details.localPosition.dx,
-                        'dy': details.localPosition.dy,
-                      },
-                      'roomName': widget.data['name'],
-                    });
-                  },
-                  //onPanEnd: Called when the user lifts their finger.
-                  onPanEnd: (details) {
-                    _socket.emit('paint', {
-                      'details': null,
-                      'roomName': widget.data['name'],
-                    });
-                  },
-                  child: SizedBox.expand(
-                    child: ClipRRect(
-                      borderRadius: BorderRadius.all(Radius.circular(20)),
-                      child: RepaintBoundary(
-                        child: CustomPaint(
-                          size: Size.infinite,
-                          painter: MyCustomPainter(pointLists: points),
-                        ),
-                      ),
+      body: SafeArea(
+        child: Column(
+          children: [
+            // Drawing canvas
+            SizedBox(
+              width: MediaQuery.of(context).size.width,
+              height: MediaQuery.of(context).size.height * 0.55,
+              child: GestureDetector(
+                onPanUpdate: (details) {
+                  _socket.emit('paint', {
+                    'details': {
+                      'dx': details.localPosition.dx,
+                      'dy': details.localPosition.dy,
+                    },
+                    'roomName': widget.data['name'],
+                  });
+                },
+                onPanStart: (details) {
+                  _socket.emit('paint', {
+                    'details': {
+                      'dx': details.localPosition.dx,
+                      'dy': details.localPosition.dy,
+                    },
+                    'roomName': widget.data['name'],
+                  });
+                },
+                onPanEnd: (details) {
+                  _socket.emit('paint', {
+                    'details': null,
+                    'roomName': widget.data['name'],
+                  });
+                },
+                child: ClipRRect(
+                  borderRadius: BorderRadius.circular(20),
+                  child: RepaintBoundary(
+                    child: CustomPaint(
+                      size: Size.infinite,
+                      painter: MyCustomPainter(pointLists: points),
                     ),
                   ),
                 ),
               ),
-            ],
-          ),
-          Positioned(
-            top:
-                MediaQuery.of(context).size.height * 0.55 +
-                16, // canvas height + margin
-            left: 16,
-            right: 16,
-            child: Row(
-              children: [
-                //To select the color
-                IconButton(
-                  icon: Icon(
-                    Icons.color_lens,
-                    color: selectedColors,
-                  ), // no opacity
-                  onPressed: () {
-                    selectColor();
-                  },
-                ),
+            ),
 
-                Expanded(
-                  //to change the value of stroke width
-                  child: Slider(
-                    min: 1.0,
-                    max: 10.0,
-                    label: "strokeWidth $strokeWidth",
-                    activeColor: selectedColors, // no .withOpacity()
-                    value: strokeWidth,
-                    onChanged: (double value) {
-                      Map map = {
-                        'value': value,
-                        'roomName': dataOfRoom['name'],
-                      };
-                      _socket.emit('stroke-width', map);
+            // Controls row (color picker, slider, clear)
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 16.0),
+              child: Row(
+                children: [
+                  IconButton(
+                    icon: Icon(Icons.color_lens, color: selectedColors),
+                    onPressed: selectColor,
+                  ),
+                  Expanded(
+                    child: Slider(
+                      min: 1.0,
+                      max: 10.0,
+                      label: "strokeWidth $strokeWidth",
+                      activeColor: selectedColors,
+                      value: strokeWidth,
+                      onChanged: (value) {
+                        Map map = {
+                          'value': value,
+                          'roomName': dataOfRoom['name'],
+                        };
+                        _socket.emit('stroke-width', map);
+                      },
+                    ),
+                  ),
+                  IconButton(
+                    icon: Icon(Icons.layers_clear, color: selectedColors),
+                    onPressed: () {
+                      _socket.emit('clean-screen', dataOfRoom['name']);
                     },
                   ),
-                ),
-                //To clear the screen
-                IconButton(
-                  icon: Icon(Icons.layers_clear, color: selectedColors),
-                  onPressed: () {
-                    _socket.emit('clean-screen', dataOfRoom['name']);
-                  },
-                ),
-              ],
+                ],
+              ),
             ),
-          ),
-        ],
+
+            // Word blanks just below the slider
+            const SizedBox(height: 12),
+            Row(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: textBlankWidget.map((widget) {
+                return Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 6),
+                  child: widget,
+                );
+              }).toList(),
+            ),
+            //Displaying messages
+            Expanded(
+              child: ListView.builder(
+                controller: _scrollController,
+                shrinkWrap: true,
+                itemCount: messaages.length,
+                itemBuilder: (context, index) {
+                  var msg = messaages[index].values;
+                  return ListTile(
+                    title: Text(
+                      msg.elementAt(0),
+                      style: TextStyle(
+                        fontSize: 19,
+                        color: Colors.black,
+                        fontWeight: FontWeight.bold,
+                      ),
+                    ),
+                    subtitle: Text(
+                      msg.elementAt(1),
+                      style: TextStyle(fontSize: 16, color: Colors.grey),
+                    ),
+                  );
+                },
+              ),
+            ),
+            Padding(
+              padding: const EdgeInsets.symmetric(
+                horizontal: 20.0,
+                vertical: 8,
+              ),
+              child: TextField(
+                controller: controller,
+                autocorrect: false,
+                decoration: InputDecoration(
+                  border: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(18),
+                    borderSide: BorderSide(color: Colors.transparent),
+                  ),
+                  enabledBorder: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(18),
+                    borderSide: BorderSide(color: Colors.transparent),
+                  ),
+                  contentPadding: EdgeInsets.symmetric(
+                    horizontal: 16,
+                    vertical: 14,
+                  ),
+                  filled: true,
+                  fillColor: Color(0xffF5F5FA),
+                  hintText: 'Your Guess',
+                  hintStyle: TextStyle(
+                    fontSize: 14,
+                    fontWeight: FontWeight.w400,
+                  ),
+                ),
+                textInputAction: TextInputAction.done,
+              ),
+            ),
+          ],
+        ),
       ),
     );
   }
