@@ -88,6 +88,17 @@ class _PaintScreenState extends State<PaintScreen> {
           selectedColors = otherColor;
         });
       });
+      _socket.on('stroke-width', (value) {
+        setState(() {
+          strokeWidth = value.toDouble();
+        });
+      });
+
+      _socket.on('clear-screen', (data) {
+        setState(() {
+          points.clear();
+        });
+      });
     });
   }
 
@@ -105,15 +116,16 @@ class _PaintScreenState extends State<PaintScreen> {
             child: BlockPicker(
               pickerColor: selectedColors,
               onColorChanged: (color) {
-                String colorString = color.toHexString();
-                //only extract the hex part of colorString
+                setState(() {
+                  selectedColors = color;
+                  opacity =
+                      1.0; // Optional: Reset to full opacity to avoid fading
+                });
+
                 String valueString = color.value
                     .toRadixString(16)
                     .padLeft(8, '0')
                     .substring(2);
-
-                print(colorString);
-                print(valueString);
 
                 Map map = {
                   'color': valueString,
@@ -136,6 +148,7 @@ class _PaintScreenState extends State<PaintScreen> {
     }
 
     return Scaffold(
+      backgroundColor: Colors.white,
       body: Stack(
         children: [
           Column(
@@ -191,33 +204,47 @@ class _PaintScreenState extends State<PaintScreen> {
             ],
           ),
           Positioned(
-            top: MediaQuery.of(context).size.height * 0.55 + 16, // canvas height + margin
+            top:
+                MediaQuery.of(context).size.height * 0.55 +
+                16, // canvas height + margin
             left: 16,
             right: 16,
             child: Row(
               children: [
                 //To select the color
                 IconButton(
-                  icon: Icon(Icons.color_lens, color: selectedColors),
+                  icon: Icon(
+                    Icons.color_lens,
+                    color: selectedColors,
+                  ), // no opacity
                   onPressed: () {
                     selectColor();
                   },
                 ),
+
                 Expanded(
                   //to change the value of stroke width
                   child: Slider(
                     min: 1.0,
                     max: 10.0,
                     label: "strokeWidth $strokeWidth",
-                    activeColor: selectedColors,
+                    activeColor: selectedColors, // no .withOpacity()
                     value: strokeWidth,
-                    onChanged: (double value) {},
+                    onChanged: (double value) {
+                      Map map = {
+                        'value': value,
+                        'roomName': dataOfRoom['name'],
+                      };
+                      _socket.emit('stroke-width', map);
+                    },
                   ),
                 ),
                 //To clear the screen
                 IconButton(
                   icon: Icon(Icons.layers_clear, color: selectedColors),
-                  onPressed: () {},
+                  onPressed: () {
+                    _socket.emit('clean-screen', dataOfRoom['name']);
+                  },
                 ),
               ],
             ),

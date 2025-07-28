@@ -111,6 +111,16 @@ io.on('connection', (socket) => {
     socket.on('color-change', ({color, roomName}) => {
         io.to(roomName).emit('color-change', color);
     })
+
+    //Stroke socket
+    socket.on('stroke-width', ({value, roomName}) => {
+        io.to(roomName).emit('stroke-width', value);
+    })
+
+    //Clear screen
+    socket.on('clean-screen', (roomName) => {
+        io.to(roomName).emit('clear-screen', '');
+    })
 })
 
 server.listen(port, "0.0.0.0", () => {

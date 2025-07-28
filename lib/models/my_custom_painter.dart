@@ -1,5 +1,4 @@
 import 'package:flutter/material.dart';
-import 'dart:ui' as ui;
 
 import 'package:skribbl_clone/models/touch_points.dart';
 
