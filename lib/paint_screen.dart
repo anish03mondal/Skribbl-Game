@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_colorpicker/flutter_colorpicker.dart';
 import 'package:skribbl_clone/models/my_custom_painter.dart';
@@ -27,12 +29,30 @@ class _PaintScreenState extends State<PaintScreen> {
   List<Map> messaages = [];
   TextEditingController controller = TextEditingController();
   int gussedUserCtr = 0;
+  int _start = 90;
+  late Timer _timer;
 
   @override
   void initState() {
     super.initState();
     connect();
     print(widget.data);
+  }
+
+  void startTimer() {
+    const oneSec = Duration(seconds: 1);
+    _timer = Timer.periodic(oneSec, (Timer time) {
+      if (_start == 0) {
+        _socket.emit('change-turn', dataOfRoom['name']);
+        setState(() {
+          _timer.cancel();
+        });
+      } else {
+        setState(() {
+          _start--;
+        });
+      }
+    });
   }
 
   void renderTextBlank(String text) {
@@ -151,6 +171,7 @@ class _PaintScreenState extends State<PaintScreen> {
                 dataOfRoom = data;
                 renderTextBlank(data['word']);
                 gussedUserCtr = 0;
+                _start = 90;
                 points.clear();
               });
               Navigator.of(context).pop();
@@ -366,6 +387,15 @@ class _PaintScreenState extends State<PaintScreen> {
                   ),
                 ),
                 textInputAction: TextInputAction.done,
+              ),
+            ),
+            FloatingActionButton(
+              onPressed: () {},
+              elevation: 7,
+              backgroundColor: Colors.white,
+              child: Text(
+                '$_start',
+                style: TextStyle(color: Colors.black, fontSize: 25),
               ),
             ),
           ],
