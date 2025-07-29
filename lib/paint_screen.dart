@@ -26,6 +26,7 @@ class _PaintScreenState extends State<PaintScreen> {
   ScrollController _scrollController = ScrollController();
   List<Map> messaages = [];
   TextEditingController controller = TextEditingController();
+  int gussedUserCtr = 0;
 
   @override
   void initState() {
@@ -126,12 +127,36 @@ class _PaintScreenState extends State<PaintScreen> {
       _socket.on('msg', (msgData) {
         setState(() {
           messaages.add(msgData);
+          gussedUserCtr = msgData['gussedUserCtr'];
         });
+
+        if (gussedUserCtr == dataOfRoom['players'].length - 1) {
+          _socket.emit('change-turn', dataOfRoom['name']);
+        }
 
         _scrollController.animateTo(
           _scrollController.position.maxScrollExtent + 40,
           duration: Duration(milliseconds: 200),
           curve: Curves.easeInOut,
+        );
+      });
+
+      _socket.on('change-turn', (data) {
+        String oldWord = dataOfRoom['word'];
+        showDialog(
+          context: context,
+          builder: (context) {
+            Future.delayed(Duration(seconds: 3), () {
+              setState(() {
+                dataOfRoom = data;
+                renderTextBlank(data['word']);
+                gussedUserCtr = 0;
+                points.clear();
+              });
+              Navigator.of(context).pop();
+            });
+            return AlertDialog(title: Center(child: Text('Word was $oldWord')));
+          },
         );
       });
     });
@@ -312,6 +337,7 @@ class _PaintScreenState extends State<PaintScreen> {
                       'msg': value.trim(),
                       'word': dataOfRoom['word'],
                       'roomName': widget.data['name'],
+                      'gussedUserCtr': gussedUserCtr,
                     };
                     _socket.emit('msg', map);
                     controller.clear();
