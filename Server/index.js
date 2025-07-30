@@ -1,193 +1,190 @@
-const { Socket } = require('dgram');
 const express = require('express');
-var http = require('http');
-var app = express();
-const port = process.env.port || 3000;
-//This line creates an HTTP server in Node.js using the http module, and uses an Express app (app) to handle requests.
-var server = http.createServer(app);
+const http = require('http');
 const mongoose = require('mongoose');
+const socketio = require('socket.io');
 const Room = require('./models/Room');
 const getWord = require('./api/getWord');
-//Loads the Socket.IO library and attaches it to your HTTP server.
-var io = require('socket.io')(server);
 
-//middleware
-//express.json() parses that string and turns it into a JavaScript object:
+const app = express();
+const server = http.createServer(app);
+const io = socketio(server);
+const port = process.env.PORT || 3000;
+
+// Middleware
 app.use(express.json());
 
-const DB = 'mongodb+srv://anish03mondal:Anish12345@cluster0.knr6sql.mongodb.net/'
+// MongoDB connection
+const DB = 'mongodb+srv://anish03mondal:Anish12345@cluster0.knr6sql.mongodb.net/';
+mongoose.connect(DB).then(() => {
+  console.log('✅ MongoDB Connected');
+}).catch((err) => {
+  console.log('❌ MongoDB Error:', err);
+});
 
-mongoose.connect(DB).then(()=> {
-    try
-    {
-        console.log('Connection successful');
-    }
-    catch(e)
-    {
-        console.log(e);
-    }
-    
-})
-
+// --- SOCKET.IO HANDLING ---
 io.on('connection', (socket) => {
-    console.log('Connected');
-    // create game callback
-    socket.on('create-game', async({nickname, name, occupancy, maxRounds}) => {
-        try {
-            const existingRoom = await Room.findOne({name});
-            if(existingRoom)
-            {
-                socket.emit('notCorrectGame', 'Room with that name already exists');
-                return;
-            }
-            let room = new Room;
-            let word = getWord();
-            room.word = word;
-            room.nickname = nickname;
-            room.name = name;
-            room.occupancy = occupancy;
-            room.maxRounds = maxRounds;
+  console.log('🟢 A user connected:', socket.id);
 
-            let player = {
-                socketID: socket.id,
-                nickname,
-                isPartyLeader: true,
-            }
-            room.players.push(player);
-            room = await room.save();
-            socket.join(name);
-            io.to(name).emit('updateRoom', room);
-            
-        } catch (err) {
-            console.log(err);
-            
+  // CREATE GAME
+  socket.on('create-game', async ({ nickname, name, occupancy, maxRounds }) => {
+    try {
+      const existingRoom = await Room.findOne({ name });
+      if (existingRoom) {
+        socket.emit('notCorrectGame', 'Room with that name already exists');
+        return;
+      }
+
+      let room = new Room();
+      room.word = getWord();
+      room.nickname = nickname;
+      room.name = name;
+      room.occupancy = occupancy;
+      room.maxRounds = maxRounds;
+
+      const player = {
+        socketID: socket.id,
+        nickname,
+        isPartyLeader: true,
+        points: 0,
+      };
+      room.players.push(player);
+      room = await room.save();
+
+      socket.join(name);
+      io.to(name).emit('updateRoom', room);
+    } catch (err) {
+      console.error(err);
+    }
+  });
+
+  // JOIN GAME
+  socket.on('join-game', async ({ nickname, name }) => {
+    try {
+      let room = await Room.findOne({ name });
+      if (!room) {
+        socket.emit('notCorrectGame', 'Please enter a valid room name');
+        return;
+      }
+
+      if (room.isJoin) {
+        const player = {
+          socketID: socket.id,
+          nickname,
+          points: 0,
+        };
+        room.players.push(player);
+        socket.join(name);
+
+        if (room.players.length === room.occupancy) {
+          room.isJoin = false;
         }
-    })
 
-    //join game call back
-    socket.on('join-game', async ({nickname, name}) => {
-        try{
-            let room = await Room.findOne({name});
-            if(!room)
-            {
-                socket.emit('notCorrectGame', 'Please enter a valid room name');
-                return;
-            }
-            
-            if(room.isJoin)
-            {
-                let player = {
-                    socketID : socket.id,
-                    nickname,
-                }
-                room.players.push(player);
-                socket.join(name);
+        room.turn = room.players[room.turnIndex];
+        room = await room.save();
+        io.to(name).emit('updateRoom', room);
+      } else {
+        socket.emit('notCorrectGame', 'The game is in progress, please try again later');
+      }
+    } catch (err) {
+      console.error(err);
+    }
+  });
 
-                if(room.players.length === room.occupancy)
-                {
-                    room.isJoin = false;
-                }
-                room.turn = room.players[room.turnIndex];
-                room = await room.save();
-                io.to(name).emit('updateRoom', room);
-            }
-            else
-            {
-                socket.emit('notCorrectGame', 'The game is in progress, please try again later');
-            }
+  // PAINT
+  socket.on('paint', ({ details, roomName }) => {
+    io.to(roomName).emit('points', { details });
+  });
+
+  // COLOR
+  socket.on('color-change', ({ color, roomName }) => {
+    io.to(roomName).emit('color-change', color);
+  });
+
+  // STROKE
+  socket.on('stroke-width', ({ value, roomName }) => {
+    io.to(roomName).emit('stroke-width', value);
+  });
+
+  // CLEAR
+  socket.on('clean-screen', (roomName) => {
+    io.to(roomName).emit('clear-screen', '');
+  });
+
+  // GUESS / MESSAGE
+  socket.on('msg', async (data) => {
+    try {
+      const room = await Room.findOne({ name: data.roomName });
+      if (!room) return;
+
+      if (data.msg === room.word) {
+        const userPlayers = room.players.filter(p => p.nickname === data.username);
+        if (data.timeTaken !== 0) {
+          userPlayers[0].points += Math.round((200 / data.timeTaken) * 10);
         }
-        catch(err)
-        {
-            console.log(err);
+
+        // ⬇️ Increment guessed counter
+        room.gussedUserCtr = (room.gussedUserCtr || 0) + 1;
+
+        await room.save();
+
+        io.to(data.roomName).emit('msg', {
+          username: data.username,
+          msg: 'Guessed it',
+          gussedUserCtr: room.gussedUserCtr,
+        });
+
+        // ⬇️ Check if all others guessed
+        if (room.gussedUserCtr >= room.players.length - 1) {
+          io.to(data.roomName).emit('change-turn', room);
         }
-    })
+      } else {
+        io.to(data.roomName).emit('msg', {
+          username: data.username,
+          msg: data.msg,
+          gussedUserCtr: room.gussedUserCtr || 0,
+        });
+      }
+    } catch (err) {
+      console.error(err);
+    }
+  });
 
-    //White board socket
-    socket.on('paint', ({details, roomName}) => {
-        io.to(roomName).emit('points', {details: details});
-    })
+  // CHANGE TURN
+  socket.on('change-turn', async (name) => {
+    try {
+      let room = await Room.findOne({ name });
+      if (!room) return;
 
-    //Color socket
-    socket.on('color-change', ({color, roomName}) => {
-        io.to(roomName).emit('color-change', color);
-    })
+      const idx = room.turnIndex;
+      if (idx + 1 === room.players.length) {
+        room.currentRound += 1;
+      }
 
-    //Stroke socket
-    socket.on('stroke-width', ({value, roomName}) => {
-        io.to(roomName).emit('stroke-width', value);
-    })
+      if (room.currentRound <= room.maxRounds) {
+        const newWord = getWord();
+        room.word = newWord;
+        room.turnIndex = (idx + 1) % room.players.length;
+        room.turn = room.players[room.turnIndex];
+        room.gussedUserCtr = 0;
 
-    //Clear screen
-    socket.on('clean-screen', (roomName) => {
-        io.to(roomName).emit('clear-screen', '');
-    })
+        room = await room.save();
+        io.to(name).emit('change-turn', room);
+      } else {
+        // TODO: emit leaderboard logic
+        io.to(name).emit('show-leaderboard', room.players);
+      }
+    } catch (err) {
+      console.error(err);
+    }
+  });
 
-    //message
-    socket.on('msg', async(data) => {
-        try {
-            if(data.msg === data.word)
-            {
-                let room = await Room.find({name: data.roomName});
-                let userPlayers = room[0].players.filter((player) => player.nickname === data.username);
-                if(data.timeTaken != 0)
-                {
-                    userPlayers[0].points += Math.round((200 / data.timeTaken) * 10);
-                }
-                room = await room[0].save();
-                io.to(data.roomName).emit('msg', {
-                username: data.username,
-                msg: 'Gussed it',
-                gussedUserCtr: data.gussedUserCtr,
-            })
-            }
-            else
-            {
-                io.to(data.roomName).emit('msg', {
-                username: data.username,
-                msg: data.msg,
-                gussedUserCtr: data.gussedUserCtr,
-            })
-            }
-            
-        }
-        catch(err)
-        {
-            console.log(err.toString());
-        }
-    })
+  socket.on('disconnect', () => {
+    console.log('🔴 User disconnected:', socket.id);
+    // optional: remove player from room, etc.
+  });
+});
 
-    //change turn
-    socket.on('change-turn', async (name) => {
-        try
-        {
-            let room = await Room.findOne({name});
-            let idx = room.turnIndex;
-            if(idx+1 === players.length)
-            {
-                room.currentRound += 1;
-            }
-
-            if(room.currentRound <= room.maxRounds)
-            {
-                const word = room.getWord();
-                room.word = word;
-                room.turnIndex = (idx+1) % room.players.length;
-                room.turn = room.players[room.turnIndex];
-                room = await room.save();
-                io.to(name).emit('change-turn', room);
-            }
-            else
-            {
-                //show the leaderboard
-            }
-        }
-        catch(err)
-        {
-            console.log(err);
-        }
-    })
-})
-
+// Start the server
 server.listen(port, "0.0.0.0", () => {
-    console.log("Server started and running on port " + port)
-})
+  console.log(`🚀 Server running on http://localhost:${port}`);
+});
