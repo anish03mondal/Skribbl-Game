@@ -118,9 +118,11 @@ io.on('connection', (socket) => {
 
       if (data.msg === room.word) {
         const userPlayers = room.players.filter(p => p.nickname === data.username);
-        if (data.timeTaken !== 0) {
-          userPlayers[0].points += Math.round((200 / data.timeTaken) * 10);
-        }
+        if (data.timeTaken > 0) {
+  const calculatedPoints = Math.round((200 / data.timeTaken) * 10);
+  userPlayers[0].points += calculatedPoints;
+}
+
 
         // ⬇️ Increment guessed counter
         room.gussedUserCtr = (room.gussedUserCtr || 0) + 1;
@@ -132,6 +134,8 @@ io.on('connection', (socket) => {
           msg: 'Guessed it',
           gussedUserCtr: room.gussedUserCtr,
         });
+
+        socket.emit('close-input', "");
 
         // ⬇️ Check if all others guessed
         if (room.gussedUserCtr >= room.players.length - 1) {
@@ -146,6 +150,17 @@ io.on('connection', (socket) => {
       }
     } catch (err) {
       console.error(err);
+    }
+  });
+
+  socket.on('updateScore', async (name) => {
+    try {
+      const room = await Room.findOne({name});
+      io.to(name).emit('updateScore', room);
+    }
+    catch(err)
+    {
+      console.log(err);
     }
   });
 
@@ -177,6 +192,8 @@ io.on('connection', (socket) => {
       console.error(err);
     }
   });
+
+  
 
   socket.on('disconnect', () => {
     console.log('🔴 User disconnected:', socket.id);
