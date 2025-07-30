@@ -10,7 +10,6 @@ const server = http.createServer(app);
 const io = socketio(server);
 const port = process.env.PORT || 3000;
 
-// Middleware
 app.use(express.json());
 
 // MongoDB connection
@@ -21,11 +20,9 @@ mongoose.connect(DB).then(() => {
   console.log('❌ MongoDB Error:', err);
 });
 
-// --- SOCKET.IO HANDLING ---
 io.on('connection', (socket) => {
   console.log('🟢 A user connected:', socket.id);
 
-  // CREATE GAME
   socket.on('create-game', async ({ nickname, name, occupancy, maxRounds }) => {
     try {
       const existingRoom = await Room.findOne({ name });
@@ -57,7 +54,6 @@ io.on('connection', (socket) => {
     }
   });
 
-  // JOIN GAME
   socket.on('join-game', async ({ nickname, name }) => {
     try {
       let room = await Room.findOne({ name });
@@ -90,81 +86,80 @@ io.on('connection', (socket) => {
     }
   });
 
-  // PAINT
   socket.on('paint', ({ details, roomName }) => {
     io.to(roomName).emit('points', { details });
   });
 
-  // COLOR
   socket.on('color-change', ({ color, roomName }) => {
     io.to(roomName).emit('color-change', color);
   });
 
-  // STROKE
   socket.on('stroke-width', ({ value, roomName }) => {
     io.to(roomName).emit('stroke-width', value);
   });
 
-  // CLEAR
   socket.on('clean-screen', (roomName) => {
     io.to(roomName).emit('clear-screen', '');
   });
 
-  // GUESS / MESSAGE
   socket.on('msg', async (data) => {
-    try {
-      const room = await Room.findOne({ name: data.roomName });
-      if (!room) return;
+  try {
+    const room = await Room.findOne({ name: data.roomName });
+    if (!room) return;
 
-      if (data.msg === room.word) {
-        const userPlayers = room.players.filter(p => p.nickname === data.username);
-        if (data.timeTaken > 0) {
-  const calculatedPoints = Math.round((200 / data.timeTaken) * 10);
-  userPlayers[0].points += calculatedPoints;
-}
+    console.log("Incoming msg data:", data);
 
+    if (data.msg === room.word) {
+      const userPlayer = room.players.find(p => p.nickname === data.username);
 
-        // ⬇️ Increment guessed counter
-        room.gussedUserCtr = (room.gussedUserCtr || 0) + 1;
-
-        await room.save();
-
-        io.to(data.roomName).emit('msg', {
-          username: data.username,
-          msg: 'Guessed it',
-          gussedUserCtr: room.gussedUserCtr,
-        });
-
-        socket.emit('close-input', "");
-
-        // ⬇️ Check if all others guessed
-        if (room.gussedUserCtr >= room.players.length - 1) {
-          io.to(data.roomName).emit('change-turn', room);
-        }
+      if (userPlayer && data.timeTaken > 0 && data.timeTaken <= 60) {
+        const calculatedPoints = Math.max(5, Math.round((200 / data.timeTaken) * 10));
+        userPlayer.points += calculatedPoints;
+        console.log(`✅ ${data.username} earned ${calculatedPoints} points`);
       } else {
-        io.to(data.roomName).emit('msg', {
-          username: data.username,
-          msg: data.msg,
-          gussedUserCtr: room.gussedUserCtr || 0,
-        });
+        console.log(`❌ No points: ${data.username}, timeTaken=${data.timeTaken}`);
       }
-    } catch (err) {
-      console.error(err);
+
+      room.gussedUserCtr = (room.gussedUserCtr || 0) + 1;
+
+      await room.save();
+
+      io.to(data.roomName).emit('msg', {
+        username: data.username,
+        msg: 'Guessed it',
+        gussedUserCtr: room.gussedUserCtr,
+      });
+
+      socket.emit('close-input', "");
+
+      // notify frontend to update score
+      io.to(data.roomName).emit('updateScore', room);
+
+      if (room.gussedUserCtr >= room.players.length - 1) {
+        io.to(data.roomName).emit('change-turn', room);
+      }
+    } else {
+      io.to(data.roomName).emit('msg', {
+        username: data.username,
+        msg: data.msg,
+        gussedUserCtr: room.gussedUserCtr || 0,
+      });
     }
-  });
+  } catch (err) {
+    console.error(err);
+  }
+});
+
 
   socket.on('updateScore', async (name) => {
     try {
-      const room = await Room.findOne({name});
+      const room = await Room.findOne({ name });
       io.to(name).emit('updateScore', room);
-    }
-    catch(err)
-    {
+    } catch (err) {
       console.log(err);
     }
   });
 
-  // CHANGE TURN
   socket.on('change-turn', async (name) => {
     try {
       let room = await Room.findOne({ name });
@@ -185,7 +180,6 @@ io.on('connection', (socket) => {
         room = await room.save();
         io.to(name).emit('change-turn', room);
       } else {
-        // TODO: emit leaderboard logic
         io.to(name).emit('show-leaderboard', room.players);
       }
     } catch (err) {
@@ -193,15 +187,32 @@ io.on('connection', (socket) => {
     }
   });
 
-  
+  socket.on('disconnect', async () => {
+    try {
+      const room = await Room.findOne({ "players.socketID": socket.id });
+      if (!room) return;
 
-  socket.on('disconnect', () => {
-    console.log('🔴 User disconnected:', socket.id);
-    // optional: remove player from room, etc.
+      for (let i = 0; i < room.players.length; i++) {
+        if (room.players[i].socketID === socket.id) {
+          room.players.splice(i, 1);
+          break;
+        }
+      }
+
+      await room.save();
+
+      // ✅ Emit leaderboard only if round is finished
+      if (room.players.length <= 1 && room.currentRound >= room.maxRounds) {
+        socket.broadcast.to(room.name).emit('show-leaderboard', room.players);
+      } else {
+        socket.broadcast.to(room.name).emit('user-disconnected', room);
+      }
+    } catch (err) {
+      console.log(err);
+    }
   });
 });
 
-// Start the server
-server.listen(port, "0.0.0.0", () => {
+server.listen(port, '0.0.0.0', () => {
   console.log(`🚀 Server running on http://localhost:${port}`);
 });
