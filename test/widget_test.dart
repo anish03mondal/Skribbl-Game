@@ -55,9 +55,9 @@ void main() {
   test('ServerConfigService initial and update test', () async {
     final serverConfig = ServerConfigService.instance;
     await serverConfig.init();
-    expect(serverConfig.serverUrl.isNotEmpty, isTrue);
+    expect(serverConfig.serverUrl, ServerConfigService.officialCloudUrl);
 
-    await serverConfig.setServerUrl('192.168.0.112:3000');
+    await serverConfig.setServerUrl('http://192.168.0.112:3000');
     expect(serverConfig.serverUrl, 'http://192.168.0.112:3000');
   });
 }

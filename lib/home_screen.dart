@@ -290,17 +290,21 @@ class _HomeScreenState extends State<HomeScreen> {
                               mainAxisSize: MainAxisSize.min,
                               children: [
                                 const Icon(
-                                  Icons.dns_rounded,
+                                  Icons.public_rounded,
                                   size: 14,
                                   color: Color(0xFF818CF8),
                                 ),
                                 const SizedBox(width: 6),
-                                Text(
-                                  'Server: $displayUrl',
-                                  style: const TextStyle(
-                                    fontSize: 12,
-                                    color: Color(0xFF94A3B8),
-                                    fontWeight: FontWeight.w500,
+                                Flexible(
+                                  child: Text(
+                                    'Server: $displayUrl',
+                                    maxLines: 1,
+                                    overflow: TextOverflow.ellipsis,
+                                    style: const TextStyle(
+                                      fontSize: 12,
+                                      color: Color(0xFF94A3B8),
+                                      fontWeight: FontWeight.w500,
+                                    ),
                                   ),
                                 ),
                                 const SizedBox(width: 4),

@@ -1,5 +1,3 @@
-import 'dart:io' show Platform;
-import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
@@ -8,35 +6,32 @@ class ServerConfigService {
   static final ServerConfigService instance = ServerConfigService._internal();
 
   static const String _prefKey = 'skribbl_server_url';
-  static const String defaultLocalIp = '192.168.0.112';
-  static const String defaultPort = '3000';
+  
+  /// Official worldwide cloud server on Render
+  static const String officialCloudUrl = 'https://skribbl-game-1.onrender.com';
 
   final ValueNotifier<String> serverUrlNotifier = ValueNotifier<String>('');
 
   String get serverUrl => serverUrlNotifier.value.isNotEmpty
       ? serverUrlNotifier.value
-      : _getDefaultUrl();
-
-  static String _getDefaultUrl() {
-    if (kIsWeb) return 'http://localhost:3000';
-    if (!kIsWeb && Platform.isAndroid) {
-      // Default to host PC local network IP for real physical phones
-      return 'http://$defaultLocalIp:$defaultPort';
-    }
-    return 'http://localhost:3000';
-  }
+      : officialCloudUrl;
 
   Future<void> init() async {
     try {
       final prefs = await SharedPreferences.getInstance();
       final saved = prefs.getString(_prefKey);
-      if (saved != null && saved.trim().isNotEmpty) {
+      // If user had an old local loopback or local IP, automatically upgrade them to the worldwide cloud server
+      if (saved != null &&
+          saved.trim().isNotEmpty &&
+          !saved.contains('10.0.2.2') &&
+          !saved.contains('192.168.')) {
         serverUrlNotifier.value = _normalizeUrl(saved.trim());
       } else {
-        serverUrlNotifier.value = _getDefaultUrl();
+        serverUrlNotifier.value = officialCloudUrl;
+        await prefs.setString(_prefKey, officialCloudUrl);
       }
     } catch (_) {
-      serverUrlNotifier.value = _getDefaultUrl();
+      serverUrlNotifier.value = officialCloudUrl;
     }
   }
 
@@ -51,9 +46,9 @@ class ServerConfigService {
 
   static String _normalizeUrl(String input) {
     String trimmed = input.trim();
-    if (trimmed.isEmpty) return _getDefaultUrl();
+    if (trimmed.isEmpty) return officialCloudUrl;
     if (!trimmed.startsWith('http://') && !trimmed.startsWith('https://')) {
-      trimmed = 'http://$trimmed';
+      trimmed = 'https://$trimmed';
     }
     if (trimmed.endsWith('/')) {
       trimmed = trimmed.substring(0, trimmed.length - 1);
@@ -79,7 +74,7 @@ class ServerConfigService {
               ),
               title: const Row(
                 children: [
-                  Icon(Icons.dns_rounded, color: Color(0xFF818CF8), size: 24),
+                  Icon(Icons.public_rounded, color: Color(0xFF818CF8), size: 24),
                   SizedBox(width: 10),
                   Text(
                     'Server Settings',
@@ -97,7 +92,7 @@ class ServerConfigService {
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     const Text(
-                      'Enter your game server IP or domain. Real phones must connect via your PC Wi-Fi IP.',
+                      'Connected to the global cloud server so anyone in the world can play together across mobile data & Wi-Fi.',
                       style: TextStyle(color: Color(0xFF94A3B8), fontSize: 13),
                     ),
                     const SizedBox(height: 16),
@@ -110,7 +105,7 @@ class ServerConfigService {
                         fillColor: const Color(0xFF0F172A),
                         labelText: 'Server URL',
                         labelStyle: const TextStyle(color: Color(0xFF818CF8)),
-                        hintText: 'http://192.168.0.112:3000',
+                        hintText: officialCloudUrl,
                         hintStyle: const TextStyle(color: Color(0xFF475569)),
                         prefixIcon: const Icon(Icons.link, color: Color(0xFF818CF8)),
                         border: OutlineInputBorder(
@@ -125,7 +120,7 @@ class ServerConfigService {
                     ),
                     const SizedBox(height: 16),
                     const Text(
-                      'Quick Presets:',
+                      'Presets:',
                       style: TextStyle(
                         color: Color(0xFFA78BFA),
                         fontWeight: FontWeight.bold,
@@ -138,6 +133,12 @@ class ServerConfigService {
                       runSpacing: 6,
                       children: [
                         _presetChip(
+                          label: '🌍 Cloud Server (Global)',
+                          url: officialCloudUrl,
+                          controller: controller,
+                          onSelected: () => setDialogState(() {}),
+                        ),
+                        _presetChip(
                           label: 'PC Wi-Fi (192.168.0.112)',
                           url: 'http://192.168.0.112:3000',
                           controller: controller,
@@ -146,12 +147,6 @@ class ServerConfigService {
                         _presetChip(
                           label: 'Emulator (10.0.2.2)',
                           url: 'http://10.0.2.2:3000',
-                          controller: controller,
-                          onSelected: () => setDialogState(() {}),
-                        ),
-                        _presetChip(
-                          label: 'Localhost (3000)',
-                          url: 'http://localhost:3000',
                           controller: controller,
                           onSelected: () => setDialogState(() {}),
                         ),
