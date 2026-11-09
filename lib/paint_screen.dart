@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_colorpicker/flutter_colorpicker.dart';
 import 'package:skribbl_clone/final_leaderboard.dart';
 import 'package:skribbl_clone/home_screen.dart';
@@ -29,6 +30,26 @@ class _PaintScreenState extends State<PaintScreen> {
   Color selectedColors = Colors.black;
   double opacity = 1;
   double strokeWidth = 3;
+  bool isEraserMode = false;
+  Color previousColor = const Color(0xFF6366F1);
+  double previousStrokeWidth = 3;
+  Set<int> revealedLetterIndices = {};
+  bool isRoundBannerVisible = false;
+  Timer? _roundBannerTimer;
+
+  static const List<String> _avatarEmojis = [
+    '🦊',
+    '🐼',
+    '🦁',
+    '🐸',
+    '🚀',
+    '🎨',
+    '⚡',
+    '👑',
+    '🦄',
+    '🐯',
+  ];
+
   List<Widget> textBlankWidget = [];
   final ScrollController _scrollController = ScrollController();
   List<Map> messaages = [];
@@ -63,6 +84,69 @@ class _PaintScreenState extends State<PaintScreen> {
     connect();
   }
 
+  void _undoStroke() {
+    if (points.isEmpty) return;
+    HapticFeedback.lightImpact();
+    setState(() {
+      if (points.isNotEmpty && points.last == null) {
+        points.removeLast();
+      }
+      while (points.isNotEmpty && points.last != null) {
+        points.removeLast();
+      }
+    });
+    _socket.emit('undo-stroke', dataOfRoom['name'] ?? widget.data['name']);
+  }
+
+  void _toggleEraser() {
+    HapticFeedback.selectionClick();
+    setState(() {
+      isEraserMode = !isEraserMode;
+      if (isEraserMode) {
+        previousColor = selectedColors;
+        previousStrokeWidth = strokeWidth;
+        selectedColors = Colors.white;
+        strokeWidth = 22.0;
+      } else {
+        selectedColors = previousColor;
+        strokeWidth = previousStrokeWidth;
+      }
+    });
+    String valueString = selectedColors.toARGB32().toRadixString(16).padLeft(8, '0').substring(2);
+    _socket.emit('color-change', {
+      'color': valueString,
+      'roomName': dataOfRoom['name'] ?? widget.data['name'],
+    });
+    _socket.emit('stroke-width', {
+      'value': strokeWidth,
+      'roomName': dataOfRoom['name'] ?? widget.data['name'],
+    });
+  }
+
+  void _revealHintLetter() {
+    final String word = dataOfRoom['word']?.toString() ?? '';
+    if (word.isEmpty) return;
+
+    List<int> eligibleIndices = [];
+    for (int i = 0; i < word.length; i++) {
+      if (word[i] != ' ' && !revealedLetterIndices.contains(i)) {
+        eligibleIndices.add(i);
+      }
+    }
+
+    if (eligibleIndices.length > 1) {
+      eligibleIndices.shuffle();
+      final int chosenIndex = eligibleIndices.first;
+      if (mounted) {
+        setState(() {
+          revealedLetterIndices.add(chosenIndex);
+          renderTextBlank(word);
+        });
+        HapticFeedback.lightImpact();
+      }
+    }
+  }
+
   void startTimer() {
     _timer?.cancel();
     const oneSec = Duration(seconds: 1);
@@ -85,6 +169,9 @@ class _PaintScreenState extends State<PaintScreen> {
           setState(() {
             _start--;
           });
+          if (_start == 50 || _start == 25) {
+            _revealHintLetter();
+          }
           if (_start <= 5 && _start > 0) {
             SoundService.instance.playClockTick();
           }
@@ -98,6 +185,26 @@ class _PaintScreenState extends State<PaintScreen> {
     for (int i = 0; i < text.length; i++) {
       if (text[i] == ' ') {
         textBlankWidget.add(const SizedBox(width: 6));
+      } else if (revealedLetterIndices.contains(i)) {
+        textBlankWidget.add(
+          Container(
+            margin: const EdgeInsets.symmetric(horizontal: 2),
+            padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 3),
+            decoration: BoxDecoration(
+              color: const Color(0xFF0F766E).withValues(alpha: 0.35),
+              borderRadius: BorderRadius.circular(5),
+              border: Border.all(color: const Color(0xFF14B8A6)),
+            ),
+            child: Text(
+              text[i].toUpperCase(),
+              style: const TextStyle(
+                fontSize: 14,
+                color: Color(0xFF2DD4BF),
+                fontWeight: FontWeight.bold,
+              ),
+            ),
+          ),
+        );
       } else {
         textBlankWidget.add(
           Container(
@@ -411,6 +518,8 @@ class _PaintScreenState extends State<PaintScreen> {
       setState(() {
         isTurnEndedOverlay = false;
         isChoosingWord = false;
+        revealedLetterIndices.clear();
+        isRoundBannerVisible = true;
         dataOfRoom['word'] = data['word'] ?? '';
         if (data['room'] != null) {
           dataOfRoom = data['room'];
@@ -421,8 +530,47 @@ class _PaintScreenState extends State<PaintScreen> {
         _start = 90;
       });
 
+      _roundBannerTimer?.cancel();
+      _roundBannerTimer = Timer(const Duration(milliseconds: 2500), () {
+        if (mounted) {
+          setState(() {
+            isRoundBannerVisible = false;
+          });
+        }
+      });
+
       _timer?.cancel();
       startTimer();
+    });
+
+    _socket.on('undo-stroke', (_) {
+      if (!mounted) return;
+      setState(() {
+        if (points.isNotEmpty && points.last == null) {
+          points.removeLast();
+        }
+        while (points.isNotEmpty && points.last != null) {
+          points.removeLast();
+        }
+      });
+    });
+
+    _socket.on('close-guess', (data) {
+      if (!mounted) return;
+      HapticFeedback.lightImpact();
+      setState(() {
+        messaages.add({
+          'isClose': true,
+          'msg': data['msg'] ?? 'You are very close!',
+        });
+      });
+      if (_scrollController.hasClients) {
+        _scrollController.animateTo(
+          _scrollController.position.maxScrollExtent + 50,
+          duration: const Duration(milliseconds: 200),
+          curve: Curves.easeInOut,
+        );
+      }
     });
 
     _socket.on('turn-ended', (data) {
@@ -601,6 +749,7 @@ class _PaintScreenState extends State<PaintScreen> {
     _timer?.cancel();
     _wordChoiceTimer?.cancel();
     _turnEndedTimer?.cancel();
+    _roundBannerTimer?.cancel();
     _scrollController.dispose();
     controller.dispose();
     super.dispose();
@@ -831,15 +980,24 @@ class _PaintScreenState extends State<PaintScreen> {
             padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
             decoration: BoxDecoration(
               color: isCurrentDrawer
-                  ? const Color(0xFF6366F1).withValues(alpha: 0.25)
+                  ? const Color(0xFF6366F1).withValues(alpha: 0.3)
                   : const Color(0xFF1E293B).withValues(alpha: 0.75),
               borderRadius: BorderRadius.circular(16),
               border: Border.all(
                 color: isCurrentDrawer
-                    ? const Color(0xFF818CF8)
+                    ? const Color(0xFF38BDF8)
                     : const Color(0xFF334155),
-                width: isCurrentDrawer ? 1.5 : 1.0,
+                width: isCurrentDrawer ? 2.0 : 1.0,
               ),
+              boxShadow: isCurrentDrawer
+                  ? [
+                      BoxShadow(
+                        color: const Color(0xFF38BDF8).withValues(alpha: 0.4),
+                        blurRadius: 10,
+                        spreadRadius: 1,
+                      )
+                    ]
+                  : null,
             ),
             child: Row(
               mainAxisSize: MainAxisSize.min,
@@ -848,15 +1006,11 @@ class _PaintScreenState extends State<PaintScreen> {
                   clipBehavior: Clip.none,
                   children: [
                     CircleAvatar(
-                      radius: 13,
-                      backgroundColor: color,
+                      radius: 14,
+                      backgroundColor: color.withValues(alpha: 0.25),
                       child: Text(
-                        nickname.isNotEmpty ? nickname[0].toUpperCase() : '?',
-                        style: const TextStyle(
-                          color: Colors.white,
-                          fontWeight: FontWeight.bold,
-                          fontSize: 12,
-                        ),
+                        _avatarEmojis[index % _avatarEmojis.length],
+                        style: const TextStyle(fontSize: 15),
                       ),
                     ),
                     if (isCurrentDrawer)
@@ -866,10 +1020,10 @@ class _PaintScreenState extends State<PaintScreen> {
                         child: Container(
                           padding: const EdgeInsets.all(2),
                           decoration: const BoxDecoration(
-                            color: Color(0xFF818CF8),
+                            color: Color(0xFF38BDF8),
                             shape: BoxShape.circle,
                           ),
-                          child: const Icon(Icons.edit, size: 8, color: Colors.white),
+                          child: const Icon(Icons.brush, size: 8, color: Colors.black),
                         ),
                       ),
                   ],
@@ -882,7 +1036,7 @@ class _PaintScreenState extends State<PaintScreen> {
                     Text(
                       nickname,
                       style: TextStyle(
-                        color: isCurrentDrawer ? const Color(0xFFA78BFA) : Colors.white,
+                        color: isCurrentDrawer ? const Color(0xFF38BDF8) : Colors.white,
                         fontSize: 11,
                         fontWeight: FontWeight.bold,
                       ),
@@ -973,6 +1127,7 @@ class _PaintScreenState extends State<PaintScreen> {
                     return GestureDetector(
                       onTap: () {
                         setState(() {
+                          isEraserMode = false;
                           selectedColors = color;
                           opacity = 1.0;
                         });
@@ -983,7 +1138,11 @@ class _PaintScreenState extends State<PaintScreen> {
                             .substring(2);
                         _socket.emit('color-change', {
                           'color': valueString,
-                          'roomName': dataOfRoom['name'],
+                          'roomName': dataOfRoom['name'] ?? widget.data['name'],
+                        });
+                        _socket.emit('stroke-width', {
+                          'value': strokeWidth,
+                          'roomName': dataOfRoom['name'] ?? widget.data['name'],
                         });
                       },
                       child: Container(
@@ -1027,6 +1186,27 @@ class _PaintScreenState extends State<PaintScreen> {
           const SizedBox(width: 4),
           Container(width: 1, height: 18, color: const Color(0xFF334155)),
           const SizedBox(width: 4),
+          IconButton(
+            tooltip: 'Undo stroke',
+            icon: const Icon(Icons.undo_rounded, size: 20, color: Color(0xFF38BDF8)),
+            padding: EdgeInsets.zero,
+            constraints: const BoxConstraints(minWidth: 28, minHeight: 28),
+            onPressed: _undoStroke,
+          ),
+          IconButton(
+            tooltip: isEraserMode ? 'Switch to Pen' : 'Eraser mode',
+            icon: Icon(
+              isEraserMode ? Icons.edit_rounded : Icons.auto_fix_normal_rounded,
+              size: 20,
+              color: isEraserMode ? const Color(0xFFF59E0B) : const Color(0xFF94A3B8),
+            ),
+            padding: EdgeInsets.zero,
+            constraints: const BoxConstraints(minWidth: 28, minHeight: 28),
+            onPressed: _toggleEraser,
+          ),
+          const SizedBox(width: 4),
+          Container(width: 1, height: 18, color: const Color(0xFF334155)),
+          const SizedBox(width: 4),
           PopupMenuButton<double>(
             tooltip: 'Brush size',
             initialValue: strokeWidth,
@@ -1039,7 +1219,7 @@ class _PaintScreenState extends State<PaintScreen> {
               setState(() => strokeWidth = val);
               _socket.emit('stroke-width', {
                 'value': val,
-                'roomName': dataOfRoom['name'],
+                'roomName': dataOfRoom['name'] ?? widget.data['name'],
               });
             },
             child: Container(
@@ -1095,7 +1275,7 @@ class _PaintScreenState extends State<PaintScreen> {
             constraints: const BoxConstraints(minWidth: 28, minHeight: 28),
             onPressed: () {
               SoundService.instance.playCanvasClear();
-              _socket.emit('clean-screen', dataOfRoom['name']);
+              _socket.emit('clean-screen', dataOfRoom['name'] ?? widget.data['name']);
             },
           ),
         ],
@@ -1173,6 +1353,7 @@ class _PaintScreenState extends State<PaintScreen> {
       itemBuilder: (context, index) {
         final msg = messaages[index];
         final bool isCorrect = msg['isCorrect'] == true;
+        final bool isClose = msg['isClose'] == true;
 
         if (isCorrect) {
           return Container(
@@ -1202,6 +1383,44 @@ class _PaintScreenState extends State<PaintScreen> {
                     msg['msg']?.toString() ?? '',
                     style: const TextStyle(
                       color: Color(0xFF34D399),
+                      fontWeight: FontWeight.bold,
+                      fontSize: 13,
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          );
+        }
+
+        if (isClose) {
+          return Container(
+            margin: const EdgeInsets.symmetric(vertical: 3),
+            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 7),
+            decoration: BoxDecoration(
+              color: const Color(0xFF78350F).withValues(alpha: 0.45),
+              borderRadius: BorderRadius.circular(14),
+              border: Border.all(color: const Color(0xFFF59E0B), width: 1.2),
+              boxShadow: [
+                BoxShadow(
+                  color: const Color(0xFFF59E0B).withValues(alpha: 0.2),
+                  blurRadius: 8,
+                ),
+              ],
+            ),
+            child: Row(
+              children: [
+                const Icon(
+                  Icons.lightbulb_rounded,
+                  color: Color(0xFFFBBF24),
+                  size: 16,
+                ),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: Text(
+                    msg['msg']?.toString() ?? "You're very close!",
+                    style: const TextStyle(
+                      color: Color(0xFFFDE68A),
                       fontWeight: FontWeight.bold,
                       fontSize: 13,
                     ),
@@ -1263,87 +1482,179 @@ class _PaintScreenState extends State<PaintScreen> {
       );
     }
 
-    return Container(
-      margin: const EdgeInsets.fromLTRB(16, 4, 16, 10),
-      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 4),
-      decoration: BoxDecoration(
-        color: const Color(0xFF1E293B),
-        borderRadius: BorderRadius.circular(28),
-        border: Border.all(color: const Color(0xFF334155)),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withValues(alpha: 0.3),
-            blurRadius: 8,
-            offset: const Offset(0, 2),
-          ),
-        ],
-      ),
-      child: Row(
-        children: [
-          const SizedBox(width: 12),
-          Expanded(
-            child: TextField(
-              readOnly: isTextInputReadOnly,
-              controller: controller,
-              style: const TextStyle(color: Colors.white, fontSize: 14),
-              onSubmitted: (value) => _sendGuess(value),
-              autocorrect: false,
-              decoration: InputDecoration(
-                border: InputBorder.none,
-                isDense: true,
-                contentPadding: const EdgeInsets.symmetric(vertical: 10),
-                hintText: isTextInputReadOnly
-                    ? 'You already guessed correctly! 🎉'
-                    : 'Type your guess here...',
-                hintStyle: TextStyle(
-                  fontSize: 13,
-                  color: isTextInputReadOnly
-                      ? const Color(0xFF34D399)
-                      : const Color(0xFF64748B),
-                ),
-              ),
-              textInputAction: TextInputAction.done,
-            ),
-          ),
-          Material(
-            color: Colors.transparent,
-            child: InkWell(
-              borderRadius: BorderRadius.circular(22),
-              onTap: isTextInputReadOnly ? null : () => _sendGuess(controller.text),
-              child: Container(
-                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-                decoration: BoxDecoration(
-                  gradient: const LinearGradient(
-                    colors: [Color(0xFF6366F1), Color(0xFF8B5CF6)],
+    final List<String> quickReactions = ['🔥', '😂', '👏', '🎨', '🤔', '⏰', '🎉'];
+
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        // Quick reaction emoji chips
+        Container(
+          height: 32,
+          margin: const EdgeInsets.symmetric(horizontal: 16),
+          child: ListView.separated(
+            scrollDirection: Axis.horizontal,
+            itemCount: quickReactions.length,
+            separatorBuilder: (_, __) => const SizedBox(width: 6),
+            itemBuilder: (context, i) {
+              final emoji = quickReactions[i];
+              return InkWell(
+                borderRadius: BorderRadius.circular(16),
+                onTap: isTextInputReadOnly
+                    ? null
+                    : () {
+                        HapticFeedback.lightImpact();
+                        _sendGuess(emoji);
+                      },
+                child: Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                  decoration: BoxDecoration(
+                    color: const Color(0xFF1E293B).withValues(alpha: 0.8),
+                    borderRadius: BorderRadius.circular(16),
+                    border: Border.all(color: const Color(0xFF334155)),
                   ),
-                  borderRadius: BorderRadius.circular(22),
-                  boxShadow: [
-                    BoxShadow(
-                      color: const Color(0xFF6366F1).withValues(alpha: 0.4),
-                      blurRadius: 8,
-                      offset: const Offset(0, 2),
-                    ),
-                  ],
+                  child: Center(
+                    child: Text(emoji, style: const TextStyle(fontSize: 16)),
+                  ),
                 ),
-                child: const Row(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    Text(
-                      'Send',
-                      style: TextStyle(
-                        color: Colors.white,
-                        fontWeight: FontWeight.bold,
-                        fontSize: 13,
-                      ),
+              );
+            },
+          ),
+        ),
+        const SizedBox(height: 6),
+        Container(
+          margin: const EdgeInsets.fromLTRB(16, 0, 16, 10),
+          padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 4),
+          decoration: BoxDecoration(
+            color: const Color(0xFF1E293B),
+            borderRadius: BorderRadius.circular(28),
+            border: Border.all(color: const Color(0xFF334155)),
+            boxShadow: [
+              BoxShadow(
+                color: Colors.black.withValues(alpha: 0.3),
+                blurRadius: 8,
+                offset: const Offset(0, 2),
+              ),
+            ],
+          ),
+          child: Row(
+            children: [
+              const SizedBox(width: 12),
+              Expanded(
+                child: TextField(
+                  readOnly: isTextInputReadOnly,
+                  controller: controller,
+                  style: const TextStyle(color: Colors.white, fontSize: 14),
+                  onSubmitted: (value) {
+                    HapticFeedback.lightImpact();
+                    _sendGuess(value);
+                  },
+                  autocorrect: false,
+                  decoration: InputDecoration(
+                    border: InputBorder.none,
+                    isDense: true,
+                    contentPadding: const EdgeInsets.symmetric(vertical: 10),
+                    hintText: isTextInputReadOnly
+                        ? 'You already guessed correctly! 🎉'
+                        : 'Type your guess here...',
+                    hintStyle: TextStyle(
+                      fontSize: 13,
+                      color: isTextInputReadOnly
+                          ? const Color(0xFF34D399)
+                          : const Color(0xFF64748B),
                     ),
-                    SizedBox(width: 4),
-                    Icon(Icons.send_rounded, color: Colors.white, size: 13),
-                  ],
+                  ),
+                  textInputAction: TextInputAction.done,
                 ),
               ),
-            ),
+              Material(
+                color: Colors.transparent,
+                child: InkWell(
+                  borderRadius: BorderRadius.circular(22),
+                  onTap: isTextInputReadOnly
+                      ? null
+                      : () {
+                          HapticFeedback.lightImpact();
+                          _sendGuess(controller.text);
+                        },
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                    decoration: BoxDecoration(
+                      gradient: const LinearGradient(
+                        colors: [Color(0xFF6366F1), Color(0xFF8B5CF6)],
+                      ),
+                      borderRadius: BorderRadius.circular(22),
+                      boxShadow: [
+                        BoxShadow(
+                          color: const Color(0xFF6366F1).withValues(alpha: 0.4),
+                          blurRadius: 8,
+                          offset: const Offset(0, 2),
+                        ),
+                      ],
+                    ),
+                    child: const Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Text(
+                          'Send',
+                          style: TextStyle(
+                            color: Colors.white,
+                            fontWeight: FontWeight.bold,
+                            fontSize: 13,
+                          ),
+                        ),
+                        SizedBox(width: 4),
+                        Icon(Icons.send_rounded, color: Colors.white, size: 13),
+                      ],
+                    ),
+                  ),
+                ),
+              ),
+            ],
           ),
-        ],
+        ),
+      ],
+    );
+  }
+
+  Widget _buildRoundBanner() {
+    if (!isRoundBannerVisible) return const SizedBox.shrink();
+    return Positioned(
+      top: 60,
+      left: 20,
+      right: 20,
+      child: Center(
+        child: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 10),
+          decoration: BoxDecoration(
+            gradient: const LinearGradient(
+              colors: [Color(0xFF6366F1), Color(0xFF8B5CF6)],
+            ),
+            borderRadius: BorderRadius.circular(20),
+            boxShadow: [
+              BoxShadow(
+                color: const Color(0xFF6366F1).withValues(alpha: 0.5),
+                blurRadius: 16,
+                offset: const Offset(0, 4),
+              ),
+            ],
+          ),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const Icon(Icons.stars_rounded, color: Color(0xFFFDE047), size: 22),
+              const SizedBox(width: 8),
+              Text(
+                'Round ${dataOfRoom['currentRound'] ?? 1} of ${dataOfRoom['maxRounds'] ?? 2}',
+                style: const TextStyle(
+                  color: Colors.white,
+                  fontWeight: FontWeight.bold,
+                  fontSize: 16,
+                  letterSpacing: 0.8,
+                ),
+              ),
+            ],
+          ),
+        ),
       ),
     );
   }
@@ -1353,6 +1664,10 @@ class _PaintScreenState extends State<PaintScreen> {
     final bool isDrawer = dataOfRoom.isNotEmpty &&
         dataOfRoom['turn'] != null &&
         dataOfRoom['turn']['nickname'] == widget.data['nickname'];
+
+    final bool isHost = (dataOfRoom['players'] as List? ?? []).any(
+          (p) => p['nickname'] == widget.data['nickname'] && (p['isPartyLeader'] == true),
+        ) || (widget.screenFrom == 'createRoom');
 
     return Scaffold(
       key: scaffoldKey,
@@ -1425,6 +1740,7 @@ class _PaintScreenState extends State<PaintScreen> {
                                       ),
                                       if (isTurnEndedOverlay)
                                         _buildTurnEndedOverlay(),
+                                      _buildRoundBanner(),
                                     ],
                                   ),
                                 ),
@@ -1491,6 +1807,7 @@ class _PaintScreenState extends State<PaintScreen> {
                                 ),
                                 if (isTurnEndedOverlay)
                                   _buildTurnEndedOverlay(),
+                                _buildRoundBanner(),
                               ],
                             );
                           },
@@ -1507,6 +1824,10 @@ class _PaintScreenState extends State<PaintScreen> {
                     noOfPlayers: (dataOfRoom['players'] as List).length,
                     lobbyName: dataOfRoom['name']?.toString() ?? '',
                     players: dataOfRoom['players'] ?? [],
+                    isHost: isHost,
+                    onStartGameNow: () {
+                      _socket.emit('start-game-now', dataOfRoom['name'] ?? widget.data['name']);
+                    },
                   )
             : hasConnectionError
                 ? _buildConnectionErrorView()

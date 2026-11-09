@@ -6,12 +6,17 @@ class WaitingLobbyScreen extends StatefulWidget {
   final int noOfPlayers;
   final String lobbyName;
   final List players;
+  final bool isHost;
+  final VoidCallback? onStartGameNow;
+
   const WaitingLobbyScreen({
     super.key,
     required this.occupancy,
     required this.noOfPlayers,
     required this.lobbyName,
     required this.players,
+    this.isHost = false,
+    this.onStartGameNow,
   });
 
   @override
@@ -19,6 +24,19 @@ class WaitingLobbyScreen extends StatefulWidget {
 }
 
 class _WaitingLobbyScreenState extends State<WaitingLobbyScreen> {
+  static const List<String> _avatarEmojis = [
+    '🦊',
+    '🐼',
+    '🦁',
+    '🐸',
+    '🚀',
+    '🎨',
+    '⚡',
+    '👑',
+    '🦄',
+    '🐯',
+  ];
+
   final List<Color> _avatarColors = [
     const Color(0xFF8B5CF6),
     const Color(0xFFEC4899),
@@ -249,15 +267,11 @@ class _WaitingLobbyScreenState extends State<WaitingLobbyScreen> {
                               child: Row(
                                 children: [
                                   CircleAvatar(
-                                    radius: 16,
-                                    backgroundColor: color,
+                                    radius: 17,
+                                    backgroundColor: color.withValues(alpha: 0.25),
                                     child: Text(
-                                      nickname.isNotEmpty ? nickname[0].toUpperCase() : '?',
-                                      style: const TextStyle(
-                                        color: Colors.white,
-                                        fontWeight: FontWeight.bold,
-                                        fontSize: 14,
-                                      ),
+                                      _avatarEmojis[index % _avatarEmojis.length],
+                                      style: const TextStyle(fontSize: 18),
                                     ),
                                   ),
                                   const SizedBox(width: 12),
@@ -305,6 +319,83 @@ class _WaitingLobbyScreenState extends State<WaitingLobbyScreen> {
                   ),
                 ),
               ),
+
+              // Host "Start Game Now" Button
+              if (widget.isHost) ...[
+                const SizedBox(height: 16),
+                if (widget.noOfPlayers >= 2)
+                  Container(
+                    width: double.infinity,
+                    height: 52,
+                    decoration: BoxDecoration(
+                      gradient: const LinearGradient(
+                        colors: [Color(0xFF10B981), Color(0xFF059669)],
+                      ),
+                      borderRadius: BorderRadius.circular(16),
+                      boxShadow: [
+                        BoxShadow(
+                          color: const Color(0xFF10B981).withValues(alpha: 0.4),
+                          blurRadius: 12,
+                          offset: const Offset(0, 4),
+                        ),
+                      ],
+                    ),
+                    child: ElevatedButton(
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: Colors.transparent,
+                        shadowColor: Colors.transparent,
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(16),
+                        ),
+                      ),
+                      onPressed: () {
+                        HapticFeedback.mediumImpact();
+                        widget.onStartGameNow?.call();
+                      },
+                      child: Row(
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        children: [
+                          const Icon(Icons.play_arrow_rounded, color: Colors.white, size: 24),
+                          const SizedBox(width: 8),
+                          Text(
+                            'Start Game Now (${widget.noOfPlayers} Players)',
+                            style: const TextStyle(
+                              fontSize: 16,
+                              fontWeight: FontWeight.bold,
+                              color: Colors.white,
+                              letterSpacing: 0.5,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  )
+                else
+                  Container(
+                    width: double.infinity,
+                    padding: const EdgeInsets.symmetric(vertical: 12),
+                    decoration: BoxDecoration(
+                      color: const Color(0xFF1E293B).withValues(alpha: 0.6),
+                      borderRadius: BorderRadius.circular(14),
+                      border: Border.all(color: const Color(0xFF334155)),
+                    ),
+                    child: const Row(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        Icon(Icons.info_outline_rounded, color: Color(0xFF94A3B8), size: 16),
+                        SizedBox(width: 8),
+                        Text(
+                          'Need at least 2 players to start the game',
+                          style: TextStyle(
+                            color: Color(0xFF94A3B8),
+                            fontSize: 13,
+                            fontWeight: FontWeight.w500,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+              ],
             ],
           ),
         ),
