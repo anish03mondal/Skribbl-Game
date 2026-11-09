@@ -13,20 +13,25 @@ class CustomTextField extends StatelessWidget {
   Widget build(BuildContext context) {
     return TextField(
       controller: contorller,
+      style: const TextStyle(color: Colors.white, fontSize: 15),
       decoration: InputDecoration(
         border: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(18),
-          borderSide: BorderSide(color: Colors.transparent),
+          borderRadius: BorderRadius.circular(16),
+          borderSide: const BorderSide(color: Color(0xFF334155)),
         ),
         enabledBorder: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(18),
-          borderSide: BorderSide(color: Colors.transparent),
+          borderRadius: BorderRadius.circular(16),
+          borderSide: const BorderSide(color: Color(0xFF334155)),
         ),
-        contentPadding: EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+        focusedBorder: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(16),
+          borderSide: const BorderSide(color: Color(0xFF818CF8), width: 1.5),
+        ),
+        contentPadding: const EdgeInsets.symmetric(horizontal: 18, vertical: 16),
         filled: true,
-        fillColor: Color(0xffF5F5FA),
+        fillColor: const Color(0xFF1E293B),
         hintText: hintText,
-        hintStyle: TextStyle(fontSize: 14, fontWeight: FontWeight.w400),
+        hintStyle: const TextStyle(fontSize: 14, color: Color(0xFF64748B)),
       ),
     );
   }
