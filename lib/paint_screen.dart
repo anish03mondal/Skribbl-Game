@@ -55,6 +55,7 @@ class _PaintScreenState extends State<PaintScreen> {
   bool hasConnectionError = false;
   String connectionErrorMessage = '';
   Timer? _connectionTimeoutTimer;
+  bool _hasJoinedRoom = false;
 
   @override
   void initState() {
@@ -287,36 +288,48 @@ class _PaintScreenState extends State<PaintScreen> {
 
     _socket.onConnect((data) {
       if (!mounted) return;
-      if (widget.screenFrom == 'createRoom') {
-        _socket.emit('create-game', widget.data);
+      if (!_hasJoinedRoom) {
+        if (widget.screenFrom == 'createRoom') {
+          _socket.emit('create-game', widget.data);
+        } else {
+          _socket.emit('join-game', widget.data);
+        }
       } else {
-        _socket.emit('join-game', widget.data);
+        // Seamless reconnect after network fluctuation: do NOT emit create-game again!
+        _socket.emit('rejoin-game', {
+          'nickname': widget.data['nickname'],
+          'roomName': dataOfRoom['name'] ?? widget.data['name'],
+        });
       }
     });
 
     _socket.onConnectError((err) {
       if (!mounted) return;
-      _connectionTimeoutTimer?.cancel();
-      setState(() {
-        isConnecting = false;
-        hasConnectionError = true;
-        connectionErrorMessage = 'Connection error: $err';
-      });
+      if (!_hasJoinedRoom) {
+        _connectionTimeoutTimer?.cancel();
+        setState(() {
+          isConnecting = false;
+          hasConnectionError = true;
+          connectionErrorMessage = 'Connection error: $err';
+        });
+      }
     });
 
     _socket.onConnectTimeout((_) {
       if (!mounted) return;
-      _connectionTimeoutTimer?.cancel();
-      setState(() {
-        isConnecting = false;
-        hasConnectionError = true;
-        connectionErrorMessage = 'Connection timed out while reaching $serverUrl';
-      });
+      if (!_hasJoinedRoom) {
+        _connectionTimeoutTimer?.cancel();
+        setState(() {
+          isConnecting = false;
+          hasConnectionError = true;
+          connectionErrorMessage = 'Connection timed out while reaching $serverUrl';
+        });
+      }
     });
 
     _socket.onError((err) {
       if (!mounted) return;
-      if (dataOfRoom.isEmpty) {
+      if (!_hasJoinedRoom && dataOfRoom.isEmpty) {
         _connectionTimeoutTimer?.cancel();
         setState(() {
           isConnecting = false;
@@ -329,6 +342,7 @@ class _PaintScreenState extends State<PaintScreen> {
     _socket.on('updateRoom', (roomData) {
       _connectionTimeoutTimer?.cancel();
       if (!mounted) return;
+      _hasJoinedRoom = true;
       setState(() {
         isConnecting = false;
         hasConnectionError = false;
@@ -555,10 +569,21 @@ class _PaintScreenState extends State<PaintScreen> {
 
     _socket.on('notCorrectGame', (data) {
       if (!mounted) return;
-      Navigator.of(context).pushAndRemoveUntil(
-        MaterialPageRoute(builder: (context) => const HomeScreen()),
-        (route) => false,
-      );
+      // Only navigate away if initial room join failed (never joined game)
+      if (!_hasJoinedRoom && dataOfRoom.isEmpty) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(data?.toString() ?? 'Error entering room'),
+            backgroundColor: const Color(0xFFEF4444),
+          ),
+        );
+        Navigator.of(context).pushAndRemoveUntil(
+          MaterialPageRoute(builder: (context) => const HomeScreen()),
+          (route) => false,
+        );
+      } else {
+        debugPrint('Ignored notCorrectGame packet during active session: $data');
+      }
     });
   }
 
@@ -566,6 +591,10 @@ class _PaintScreenState extends State<PaintScreen> {
   void dispose() {
     _connectionTimeoutTimer?.cancel();
     try {
+      _socket.emit('leave-game', {
+        'roomName': dataOfRoom['name'] ?? widget.data['name'],
+        'nickname': widget.data['nickname'],
+      });
       _socket.disconnect();
       _socket.dispose();
     } catch (_) {}
@@ -1467,7 +1496,12 @@ class _PaintScreenState extends State<PaintScreen> {
                           },
                         ),
                       )
-                    : FinalLeaderboard(scoreboard, winner)
+                    : FinalLeaderboard(
+                        scoreboard,
+                        winner,
+                        roomName: dataOfRoom['name']?.toString() ?? widget.data['name']?.toString(),
+                        nickname: widget.data['nickname']?.toString(),
+                      )
                 : WaitingLobbyScreen(
                     occupancy: int.tryParse(dataOfRoom['occupancy'].toString()) ?? 2,
                     noOfPlayers: (dataOfRoom['players'] as List).length,

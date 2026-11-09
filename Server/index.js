@@ -53,6 +53,7 @@ class InMemoryRoom {
     this.turnIndex = Number(data.turnIndex) || 0;
     this.gussedUserCtr = Number(data.gussedUserCtr) || 0;
     this.isEndingTurn = data.isEndingTurn || false;
+    this.isGameOver = data.isGameOver || false;
     this.guessedUsers = data.guessedUsers ? new Set(data.guessedUsers) : new Set();
   }
   async save() {
@@ -84,6 +85,18 @@ const RoomAdapter = {
       return null;
     }
     return null;
+  },
+  async deleteOne(query) {
+    if (query.name) {
+      inMemoryRooms.delete(query.name);
+    }
+    if (isDbConnected) {
+      try {
+        await Room.deleteOne(query);
+      } catch (err) {
+        console.warn('MongoDB delete error:', err.message);
+      }
+    }
   },
   create(data = {}) {
     if (isDbConnected) {
@@ -166,6 +179,8 @@ async function endTurnAndAdvance(room) {
     }, 3500);
   } else {
     room.isEndingTurn = false;
+    room.isGameOver = true;
+    await room.save();
     io.to(room.name).emit('show-leaderboard', room.players);
   }
 }
@@ -194,10 +209,39 @@ io.on('connection', (socket) => {
 
   socket.on('create-game', async ({ nickname, name, occupancy, maxRounds }) => {
     try {
-      const existingRoom = await RoomAdapter.findOne({ name });
+      let existingRoom = await RoomAdapter.findOne({ name });
       if (existingRoom) {
-        socket.emit('notCorrectGame', 'Room with that name already exists');
-        return;
+        // If the room has 0 players, or game is over, or abandoned -> clean it up so code can be reused!
+        const isFinished =
+          existingRoom.isGameOver ||
+          existingRoom.currentRound > existingRoom.maxRounds ||
+          !existingRoom.players ||
+          existingRoom.players.length === 0;
+
+        if (isFinished) {
+          console.log(`♻️ Cleaning up finished/empty room "${name}" for fresh game`);
+          await RoomAdapter.deleteOne({ name });
+          existingRoom = null;
+        } else {
+          // If the party leader is reconnecting after temporary network drop
+          const existingPlayer = existingRoom.players.find((p) => p.nickname === nickname);
+          if (existingPlayer) {
+            console.log(`🔄 Leader "${nickname}" reconnecting to room "${name}"`);
+            existingPlayer.socketID = socket.id;
+            socket.join(name);
+            await existingRoom.save();
+            socket.emit('updateRoom', existingRoom);
+            if (existingRoom.word && !existingRoom.isChoosingWord) {
+              socket.emit('round-started', { word: existingRoom.word, room: existingRoom });
+            }
+            return;
+          }
+          socket.emit(
+            'notCorrectGame',
+            'A game with this room code is currently in progress. Please choose another code or wait for it to finish.'
+          );
+          return;
+        }
       }
 
       let room = RoomAdapter.create();
@@ -209,6 +253,7 @@ io.on('connection', (socket) => {
       room.currentRound = 1;
       room.turnIndex = 0;
       room.isJoin = true;
+      room.isGameOver = false;
 
       const player = {
         socketID: socket.id,
@@ -235,7 +280,36 @@ io.on('connection', (socket) => {
         return;
       }
 
-      if (room.isJoin) {
+      // 1. Reconnection check: if this player already exists in the room, seamlessly reconnect them!
+      const existingPlayer = room.players.find((p) => p.nickname === nickname);
+      if (existingPlayer) {
+        console.log(`🔄 Player "${nickname}" reconnecting to room "${name}"`);
+        existingPlayer.socketID = socket.id;
+        socket.join(name);
+        await room.save();
+        socket.emit('updateRoom', room);
+
+        if (room.isChoosingWord) {
+          socket.emit('start-word-selection', {
+            roomName: room.name,
+            drawerNickname: room.turn ? room.turn.nickname : '',
+            drawerSocketId: room.turn ? room.turn.socketID : '',
+            turnIndex: room.turnIndex,
+            currentRound: room.currentRound,
+            maxRounds: room.maxRounds,
+            wordChoices: room.wordChoices || [],
+            players: room.players,
+            turn: room.turn,
+          });
+        } else if (room.word) {
+          socket.emit('round-started', { word: room.word, room: room });
+        }
+        io.to(name).emit('updateScore', room);
+        return;
+      }
+
+      // 2. Room is open for new joins
+      if (room.isJoin && !room.isGameOver) {
         const player = {
           socketID: socket.id,
           nickname,
@@ -259,7 +333,7 @@ io.on('connection', (socket) => {
           io.to(name).emit('updateRoom', room);
         }
       } else {
-        socket.emit('notCorrectGame', 'The game is in progress, please try again later');
+        socket.emit('notCorrectGame', 'The game is already in progress or has ended.');
       }
     } catch (err) {
       console.error('Error joining game:', err);
@@ -407,10 +481,66 @@ io.on('connection', (socket) => {
     }
   });
 
+  socket.on('rejoin-game', async ({ nickname, roomName }) => {
+    try {
+      let room = await RoomAdapter.findOne({ name: roomName });
+      if (!room) return;
+      const player = room.players.find((p) => p.nickname === nickname);
+      if (player) {
+        player.socketID = socket.id;
+        socket.join(roomName);
+        await room.save();
+        socket.emit('updateRoom', room);
+        if (room.isChoosingWord) {
+          socket.emit('start-word-selection', {
+            roomName: room.name,
+            drawerNickname: room.turn ? room.turn.nickname : '',
+            drawerSocketId: room.turn ? room.turn.socketID : '',
+            turnIndex: room.turnIndex,
+            currentRound: room.currentRound,
+            maxRounds: room.maxRounds,
+            wordChoices: room.wordChoices || [],
+            players: room.players,
+            turn: room.turn,
+          });
+        } else if (room.word) {
+          socket.emit('round-started', { word: room.word, room: room });
+        }
+      }
+    } catch (err) {
+      console.error('Error in rejoin-game:', err);
+    }
+  });
+
+  socket.on('leave-game', async ({ roomName, nickname }) => {
+    try {
+      let room = await RoomAdapter.findOne({ name: roomName });
+      if (!room) return;
+
+      const idx = room.players.findIndex((p) => p.nickname === nickname || p.socketID === socket.id);
+      if (idx !== -1) {
+        room.players.splice(idx, 1);
+      }
+      socket.leave(roomName);
+
+      if (room.players.length === 0 || room.isGameOver) {
+        console.log(`🧹 Room "${roomName}" cleaned up on player leave.`);
+        await RoomAdapter.deleteOne({ name: roomName });
+      } else {
+        await room.save();
+        socket.broadcast.to(roomName).emit('user-disconnected', room);
+      }
+    } catch (err) {
+      console.error('Error in leave-game:', err);
+    }
+  });
+
   socket.on('disconnect', async () => {
     try {
       const room = await RoomAdapter.findOne({ 'players.socketID': socket.id });
       if (!room) return;
+
+      const wasDrawer = room.turn && room.turn.socketID === socket.id;
 
       for (let i = 0; i < room.players.length; i++) {
         if (room.players[i].socketID === socket.id) {
@@ -419,10 +549,26 @@ io.on('connection', (socket) => {
         }
       }
 
+      // If room is empty, delete it immediately so room code is free for reuse!
+      if (room.players.length === 0) {
+        console.log(`🧹 Room "${room.name}" empty after disconnect. Freeing room code.`);
+        await RoomAdapter.deleteOne({ name: room.name });
+        return;
+      }
+
+      // If drawer disconnected during active game, advance turn so players are NOT stuck
+      if (wasDrawer && !room.isGameOver && !room.isJoin) {
+        console.log(`⚠️ Drawer disconnected in "${room.name}". Advancing turn.`);
+        await endTurnAndAdvance(room);
+        return;
+      }
+
       await room.save();
 
-      // Emit leaderboard only if round is finished or 1 player left
+      // Emit leaderboard only if round is finished or game is over
       if (room.players.length <= 1 && room.currentRound >= room.maxRounds) {
+        room.isGameOver = true;
+        await room.save();
         socket.broadcast.to(room.name).emit('show-leaderboard', room.players);
       } else {
         socket.broadcast.to(room.name).emit('user-disconnected', room);

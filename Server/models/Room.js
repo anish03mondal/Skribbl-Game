@@ -44,6 +44,10 @@ const roomSchema = new mongoose.Schema({
     type: Number,
     default: 0,
   },
+  isGameOver: {
+    type: Boolean,
+    default: false,
+  },
 });
 
 const gameModel = mongoose.model('Room', roomSchema);
