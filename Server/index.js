@@ -204,6 +204,27 @@ mongoose
     console.log('⚡ Switched to IN-MEMORY storage. Game rooms will work smoothly without a database!');
   });
 
+function levenshteinDistance(a, b) {
+  if (a.length === 0) return b.length;
+  if (b.length === 0) return a.length;
+  const matrix = [];
+  for (let i = 0; i <= b.length; i++) matrix[i] = [i];
+  for (let j = 0; j <= a.length; j++) matrix[0][j] = j;
+  for (let i = 1; i <= b.length; i++) {
+    for (let j = 1; j <= a.length; j++) {
+      if (b.charAt(i - 1) === a.charAt(j - 1)) {
+        matrix[i][j] = matrix[i - 1][j - 1];
+      } else {
+        matrix[i][j] = Math.min(
+          matrix[i - 1][j - 1] + 1,
+          Math.min(matrix[i][j - 1] + 1, matrix[i - 1][j] + 1)
+        );
+      }
+    }
+  }
+  return matrix[b.length][a.length];
+}
+
 io.on('connection', (socket) => {
   console.log('🟢 A user connected:', socket.id);
 
@@ -448,6 +469,13 @@ io.on('connection', (socket) => {
           await endTurnAndAdvance(room);
         }
       } else {
+        // Check if guess is close (Levenshtein distance of 1)
+        if (cleanWord.length >= 3 && levenshteinDistance(cleanMsg, cleanWord) === 1) {
+          socket.emit('close-guess', {
+            msg: `"${data.msg}" is very close!`,
+          });
+        }
+
         io.to(data.roomName).emit('msg', {
           username: data.username,
           msg: data.msg,
@@ -457,6 +485,33 @@ io.on('connection', (socket) => {
       }
     } catch (err) {
       console.error('Error in msg handler:', err);
+    }
+  });
+
+  socket.on('undo-stroke', (roomName) => {
+    try {
+      io.to(roomName).emit('undo-stroke', '');
+    } catch (err) {
+      console.error('Error in undo-stroke:', err);
+    }
+  });
+
+  socket.on('start-game-now', async (roomName) => {
+    try {
+      let room = await RoomAdapter.findOne({ name: roomName });
+      if (!room || !room.isJoin) return;
+      if (room.players.length < 2) return;
+      const leader = room.players.find((p) => p.isPartyLeader);
+      if (leader && leader.socketID === socket.id) {
+        room.isJoin = false;
+        room.turnIndex = 0;
+        room.turn = room.players[0];
+        await room.save();
+        io.to(roomName).emit('updateRoom', room);
+        await startTurnWordSelection(room);
+      }
+    } catch (err) {
+      console.error('Error starting game now:', err);
     }
   });
 
