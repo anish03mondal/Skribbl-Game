@@ -22,9 +22,22 @@ app.use((req, res, next) => {
 });
 
 // Serve static Flutter Web game files from public directory
-const publicPath = path.join(__dirname, 'public');
+const candidatePublicPaths = [
+  path.resolve(__dirname, 'public'),
+  path.resolve(process.cwd(), 'public'),
+  path.resolve(process.cwd(), 'Server', 'public'),
+  path.resolve(__dirname, '..', 'public'),
+];
+const publicPath = candidatePublicPaths.find(p => fs.existsSync(path.join(p, 'index.html'))) || path.resolve(__dirname, 'public');
+
 if (fs.existsSync(publicPath)) {
-  app.use(express.static(publicPath));
+  app.use(express.static(publicPath, {
+    setHeaders: (res, filePath) => {
+      if (filePath.endsWith('.wasm')) {
+        res.setHeader('Content-Type', 'application/wasm');
+      }
+    }
+  }));
 }
 
 app.get('/health', (req, res) => {
@@ -33,6 +46,8 @@ app.get('/health', (req, res) => {
     uptime: process.uptime(),
     rooms: inMemoryRooms.size,
     dbConnected: isDbConnected,
+    hasWebClient: fs.existsSync(path.join(publicPath, 'index.html')),
+    publicPath: publicPath,
   });
 });
 
