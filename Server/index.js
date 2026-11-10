@@ -7,6 +7,15 @@ const socketio = require('socket.io');
 const Room = require('./models/Room');
 const getWord = require('./api/getWord');
 
+// Process-level crash prevention to ensure active games never drop abruptly
+process.on('uncaughtException', (err) => {
+  console.error('🛡️ Uncaught Exception caught safely:', err);
+});
+
+process.on('unhandledRejection', (reason) => {
+  console.error('🛡️ Unhandled Rejection caught safely:', reason);
+});
+
 const app = express();
 const server = http.createServer(app);
 const io = socketio(server);
@@ -145,6 +154,14 @@ const get3Words = () => {
 
 // Start word selection for the current turn
 async function startTurnWordSelection(room) {
+  if (!room || !room.players || room.players.length === 0) return;
+
+  // Make sure turn index and turn drawer are strictly valid
+  if (room.turnIndex === undefined || room.turnIndex >= room.players.length || room.turnIndex < 0) {
+    room.turnIndex = 0;
+  }
+  room.turn = room.players[room.turnIndex] || room.players[0];
+
   const choices = get3Words();
   room.wordChoices = choices;
   room.word = '';
@@ -163,8 +180,8 @@ async function startTurnWordSelection(room) {
   // Notify room that the drawer is choosing a word
   io.to(room.name).emit('start-word-selection', {
     roomName: room.name,
-    drawerNickname: room.turn.nickname,
-    drawerSocketId: room.turn.socketID,
+    drawerNickname: room.turn ? room.turn.nickname : 'Player',
+    drawerSocketId: room.turn ? room.turn.socketID : '',
     turnIndex: room.turnIndex,
     currentRound: room.currentRound,
     maxRounds: room.maxRounds,
@@ -176,11 +193,27 @@ async function startTurnWordSelection(room) {
 
 // End the current turn and transition to the next player
 async function endTurnAndAdvance(room) {
-  if (room.isEndingTurn) return;
+  if (!room || room.isEndingTurn || room.isGameOver) return;
   room.isEndingTurn = true;
 
+  if (!room.players || room.players.length === 0) {
+    room.isEndingTurn = false;
+    return;
+  }
+
+  // If only 1 player remains, wait for opponent to reconnect rather than rushing rounds
+  if (room.players.length === 1) {
+    room.isEndingTurn = false;
+    io.to(room.name).emit('msg', {
+      username: 'System',
+      msg: '⏳ Waiting for opponent to reconnect...',
+      color: 'yellow',
+    });
+    return;
+  }
+
   const oldWord = room.word;
-  const idx = room.turnIndex;
+  const idx = room.turnIndex || 0;
   const nextIdx = (idx + 1) % room.players.length;
   if (nextIdx === 0) {
     room.currentRound += 1;
@@ -188,19 +221,19 @@ async function endTurnAndAdvance(room) {
 
   if (room.currentRound <= room.maxRounds) {
     room.turnIndex = nextIdx;
-    room.turn = room.players[room.turnIndex];
+    room.turn = room.players[room.turnIndex] || room.players[0];
     await room.save();
 
     // Broadcast that the turn ended and reveal the word
     io.to(room.name).emit('turn-ended', {
       oldWord: oldWord,
-      nextDrawer: room.turn.nickname,
+      nextDrawer: room.turn ? room.turn.nickname : 'Player',
     });
 
     // After 3.5 seconds, start the word selection for next turn
     setTimeout(async () => {
       let freshRoom = await RoomAdapter.findOne({ name: room.name });
-      if (freshRoom) {
+      if (freshRoom && !freshRoom.isGameOver) {
         freshRoom.isEndingTurn = false;
         await startTurnWordSelection(freshRoom);
       }
@@ -568,27 +601,52 @@ io.on('connection', (socket) => {
     try {
       let room = await RoomAdapter.findOne({ name: roomName });
       if (!room) return;
-      const player = room.players.find((p) => p.nickname === nickname);
+
+      let player = room.players.find((p) => p.nickname === nickname);
       if (player) {
         player.socketID = socket.id;
-        socket.join(roomName);
-        await room.save();
-        socket.emit('updateRoom', room);
-        if (room.isChoosingWord) {
-          socket.emit('start-word-selection', {
-            roomName: room.name,
-            drawerNickname: room.turn ? room.turn.nickname : '',
-            drawerSocketId: room.turn ? room.turn.socketID : '',
-            turnIndex: room.turnIndex,
-            currentRound: room.currentRound,
-            maxRounds: room.maxRounds,
-            wordChoices: room.wordChoices || [],
-            players: room.players,
-            turn: room.turn,
-          });
-        } else if (room.word) {
-          socket.emit('round-started', { word: room.word, room: room });
+        player.isOnline = true;
+        if (player.offlineTimer) {
+          clearTimeout(player.offlineTimer);
+          player.offlineTimer = null;
         }
+      } else if (room.players.length < room.occupancy && !room.isGameOver) {
+        player = {
+          socketID: socket.id,
+          nickname,
+          points: 0,
+          isOnline: true,
+        };
+        room.players.push(player);
+      }
+
+      socket.join(roomName);
+      await room.save();
+
+      console.log(`✅ Player "${nickname}" seamlessly reconnected to "${roomName}"!`);
+      socket.broadcast.to(roomName).emit('msg', {
+        username: 'System',
+        msg: `🎉 ${nickname} reconnected!`,
+        color: 'green',
+      });
+
+      socket.emit('updateRoom', room);
+      io.to(roomName).emit('updateScore', room);
+
+      if (room.isChoosingWord) {
+        socket.emit('start-word-selection', {
+          roomName: room.name,
+          drawerNickname: room.turn ? room.turn.nickname : '',
+          drawerSocketId: room.turn ? room.turn.socketID : '',
+          turnIndex: room.turnIndex,
+          currentRound: room.currentRound,
+          maxRounds: room.maxRounds,
+          wordChoices: room.wordChoices || [],
+          players: room.players,
+          turn: room.turn,
+        });
+      } else if (room.word) {
+        socket.emit('round-started', { word: room.word, room: room });
       }
     } catch (err) {
       console.error('Error in rejoin-game:', err);
@@ -623,39 +681,76 @@ io.on('connection', (socket) => {
       const room = await RoomAdapter.findOne({ 'players.socketID': socket.id });
       if (!room) return;
 
+      const player = room.players.find((p) => p.socketID === socket.id);
+      if (!player) return;
+
       const wasDrawer = room.turn && room.turn.socketID === socket.id;
 
-      for (let i = 0; i < room.players.length; i++) {
-        if (room.players[i].socketID === socket.id) {
-          room.players.splice(i, 1);
-          break;
+      // In lobby before game starts: remove immediately
+      if (room.isJoin) {
+        const idx = room.players.findIndex((p) => p.socketID === socket.id);
+        if (idx !== -1) room.players.splice(idx, 1);
+        if (room.players.length === 0) {
+          console.log(`🧹 Room "${room.name}" empty in lobby. Freeing room code.`);
+          await RoomAdapter.deleteOne({ name: room.name });
+          return;
         }
-      }
-
-      // If room is empty, delete it immediately so room code is free for reuse!
-      if (room.players.length === 0) {
-        console.log(`🧹 Room "${room.name}" empty after disconnect. Freeing room code.`);
-        await RoomAdapter.deleteOne({ name: room.name });
+        await room.save();
+        socket.broadcast.to(room.name).emit('user-disconnected', room);
         return;
       }
 
-      // If drawer disconnected during active game, advance turn so players are NOT stuck
-      if (wasDrawer && !room.isGameOver && !room.isJoin) {
-        console.log(`⚠️ Drawer disconnected in "${room.name}". Advancing turn.`);
-        await endTurnAndAdvance(room);
-        return;
-      }
-
+      // During active game: Apply a 25-second grace period for transient network drops!
+      player.isOnline = false;
+      player.disconnectedAt = Date.now();
       await room.save();
 
-      // Emit leaderboard only if round is finished or game is over
-      if (room.players.length <= 1 && room.currentRound >= room.maxRounds) {
-        room.isGameOver = true;
-        await room.save();
-        socket.broadcast.to(room.name).emit('show-leaderboard', room.players);
-      } else {
-        socket.broadcast.to(room.name).emit('user-disconnected', room);
+      console.log(`🔌 Player "${player.nickname}" temporarily disconnected from "${room.name}". Starting 25s grace period.`);
+      socket.broadcast.to(room.name).emit('msg', {
+        username: 'System',
+        msg: `⚠️ ${player.nickname} disconnected. Waiting for reconnect...`,
+        color: 'yellow',
+      });
+
+      // If the drawer disconnected, give 12 seconds to return before advancing turn
+      if (wasDrawer && !room.isGameOver) {
+        setTimeout(async () => {
+          let currentRoom = await RoomAdapter.findOne({ name: room.name });
+          if (!currentRoom || currentRoom.isGameOver) return;
+          const currentDrawer = currentRoom.players.find((p) => p.nickname === player.nickname);
+          if (currentDrawer && currentDrawer.isOnline === false) {
+            console.log(`⏰ Drawer "${player.nickname}" did not return within 12s. Advancing turn.`);
+            await endTurnAndAdvance(currentRoom);
+          }
+        }, 12000);
       }
+
+      // Permanent prune timer after 25 seconds
+      setTimeout(async () => {
+        let currentRoom = await RoomAdapter.findOne({ name: room.name });
+        if (!currentRoom) return;
+        const pIndex = currentRoom.players.findIndex((p) => p.nickname === player.nickname);
+        if (pIndex !== -1 && currentRoom.players[pIndex].isOnline === false) {
+          console.log(`❌ 25s grace period expired for "${player.nickname}" in "${room.name}". Removing.`);
+          currentRoom.players.splice(pIndex, 1);
+
+          const anyOnline = currentRoom.players.some((p) => p.isOnline !== false);
+          if (currentRoom.players.length === 0 || !anyOnline) {
+            console.log(`🧹 No active players in "${room.name}". Deleting room.`);
+            await RoomAdapter.deleteOne({ name: room.name });
+            return;
+          }
+
+          if (currentRoom.players.length <= 1) {
+            currentRoom.isGameOver = true;
+            await currentRoom.save();
+            io.to(currentRoom.name).emit('show-leaderboard', currentRoom.players);
+          } else {
+            await currentRoom.save();
+            io.to(currentRoom.name).emit('user-disconnected', currentRoom);
+          }
+        }
+      }, 25000);
     } catch (err) {
       console.log('Error in disconnect:', err);
     }
