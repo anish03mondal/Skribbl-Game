@@ -1,5 +1,7 @@
 const express = require('express');
 const http = require('http');
+const path = require('path');
+const fs = require('fs');
 const mongoose = require('mongoose');
 const socketio = require('socket.io');
 const Room = require('./models/Room');
@@ -19,10 +21,11 @@ app.use((req, res, next) => {
   next();
 });
 
-// Root & Health Check endpoint for cloud deployment (Render, Railway, Fly.io, etc.)
-app.get('/', (req, res) => {
-  res.send('🎮 Skribbl Multiplayer Game Server is running live!');
-});
+// Serve static Flutter Web game files from public directory
+const publicPath = path.join(__dirname, 'public');
+if (fs.existsSync(publicPath)) {
+  app.use(express.static(publicPath));
+}
 
 app.get('/health', (req, res) => {
   res.json({
@@ -31,6 +34,16 @@ app.get('/health', (req, res) => {
     rooms: inMemoryRooms.size,
     dbConnected: isDbConnected,
   });
+});
+
+// Root & SPA Fallback: Serve Flutter web app if built, otherwise show server status message
+app.get('/', (req, res) => {
+  const indexPath = path.join(publicPath, 'index.html');
+  if (fs.existsSync(indexPath)) {
+    res.sendFile(indexPath);
+  } else {
+    res.send('🎮 Skribbl Multiplayer Game Server is running live!');
+  }
 });
 
 // In-memory room store fallback when MongoDB is not running
