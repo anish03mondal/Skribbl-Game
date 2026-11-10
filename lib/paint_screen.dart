@@ -601,17 +601,42 @@ class _PaintScreenState extends State<PaintScreen> {
       if (!mounted) return;
       setState(() {
         if (point['details'] != null) {
+          final double rawDx = (point['details']['dx']).toDouble();
+          final double rawDy = (point['details']['dy']).toDouble();
+          final double sourceVw = (point['details']['vw'] ?? kVirtualCanvasWidth).toDouble();
+          final double sourceVh = (point['details']['vh'] ?? kVirtualCanvasHeight).toDouble();
+
+          // Normalize to standard virtual coordinates (0..1000, 0..750)
+          final double vx = (rawDx / sourceVw) * kVirtualCanvasWidth;
+          final double vy = (rawDy / sourceVh) * kVirtualCanvasHeight;
+
+          // Color synchronization
+          Color pointColor = selectedColors;
+          if (point['details']['color'] != null) {
+            try {
+              pointColor = Color(int.parse(point['details']['color'].toString(), radix: 16));
+            } catch (_) {}
+          }
+
+          // Stroke width synchronization
+          double pointWidth = strokeWidth;
+          if (point['details']['width'] != null) {
+            try {
+              pointWidth = (point['details']['width']).toDouble();
+            } catch (_) {}
+          }
+
+          // Scale stroke width to virtual space so it scales identically on all screens
+          final double virtualStrokeWidth = pointWidth * (kVirtualCanvasWidth / 360.0);
+
           points.add(
             TouchPoints(
-              points: Offset(
-                (point['details']['dx']).toDouble(),
-                (point['details']['dy']).toDouble(),
-              ),
+              points: Offset(vx, vy),
               paint: Paint()
                 ..strokeCap = strokeType
                 ..isAntiAlias = true
-                ..color = selectedColors.withValues(alpha: opacity)
-                ..strokeWidth = strokeWidth,
+                ..color = pointColor.withValues(alpha: opacity)
+                ..strokeWidth = virtualStrokeWidth,
             ),
           );
         } else {
@@ -1286,58 +1311,83 @@ class _PaintScreenState extends State<PaintScreen> {
   Widget _buildCanvas(bool isDrawer, double canvasHeight) {
     return Container(
       margin: const EdgeInsets.symmetric(horizontal: 16),
-      height: canvasHeight,
-      decoration: BoxDecoration(
-        color: Colors.white,
-        borderRadius: BorderRadius.circular(20),
-        border: Border.all(color: const Color(0xFF334155), width: 1.5),
-        boxShadow: [
-          BoxShadow(
-            color: const Color(0xFF6366F1).withValues(alpha: 0.12),
-            blurRadius: 18,
-            spreadRadius: 2,
-          ),
-        ],
-      ),
-      child: ClipRRect(
-        borderRadius: BorderRadius.circular(18),
-        child: GestureDetector(
-          onPanUpdate: isDrawer
-              ? (details) {
-                  _socket.emit('paint', {
-                    'details': {
-                      'dx': details.localPosition.dx,
-                      'dy': details.localPosition.dy,
-                    },
-                    'roomName': widget.data['name'],
-                  });
-                }
-              : null,
-          onPanStart: isDrawer
-              ? (details) {
-                  _socket.emit('paint', {
-                    'details': {
-                      'dx': details.localPosition.dx,
-                      'dy': details.localPosition.dy,
-                    },
-                    'roomName': widget.data['name'],
-                  });
-                }
-              : null,
-          onPanEnd: isDrawer
-              ? (details) {
-                  _socket.emit('paint', {
-                    'details': null,
-                    'roomName': widget.data['name'],
-                  });
-                }
-              : null,
-          child: RepaintBoundary(
-            child: CustomPaint(
-              size: Size.infinite,
-              painter: MyCustomPainter(
-                pointLists: points,
+      constraints: canvasHeight.isFinite
+          ? BoxConstraints(maxHeight: canvasHeight)
+          : null,
+      alignment: Alignment.center,
+      child: AspectRatio(
+        aspectRatio: kCanvasAspectRatio,
+        child: Container(
+          decoration: BoxDecoration(
+            color: Colors.white,
+            borderRadius: BorderRadius.circular(20),
+            border: Border.all(color: const Color(0xFF334155), width: 1.5),
+            boxShadow: [
+              BoxShadow(
+                color: const Color(0xFF6366F1).withValues(alpha: 0.12),
+                blurRadius: 18,
+                spreadRadius: 2,
               ),
+            ],
+          ),
+          child: ClipRRect(
+            borderRadius: BorderRadius.circular(18),
+            child: LayoutBuilder(
+              builder: (context, constraints) {
+                final double canvasWidth = constraints.maxWidth;
+                final double canvasHeight = constraints.maxHeight;
+
+                void emitStrokePoint(Offset localPos) {
+                  if (canvasWidth <= 0 || canvasHeight <= 0) return;
+                  final double normX = (localPos.dx / canvasWidth).clamp(0.0, 1.0);
+                  final double normY = (localPos.dy / canvasHeight).clamp(0.0, 1.0);
+                  final double vx = normX * kVirtualCanvasWidth;
+                  final double vy = normY * kVirtualCanvasHeight;
+
+                  String valueString = selectedColors
+                      .toARGB32()
+                      .toRadixString(16)
+                      .padLeft(8, '0')
+                      .substring(2);
+
+                  _socket.emit('paint', {
+                    'details': {
+                      'dx': vx,
+                      'dy': vy,
+                      'vw': kVirtualCanvasWidth,
+                      'vh': kVirtualCanvasHeight,
+                      'color': valueString,
+                      'width': strokeWidth,
+                    },
+                    'roomName': dataOfRoom['name'] ?? widget.data['name'],
+                  });
+                }
+
+                return GestureDetector(
+                  onPanStart: isDrawer
+                      ? (details) => emitStrokePoint(details.localPosition)
+                      : null,
+                  onPanUpdate: isDrawer
+                      ? (details) => emitStrokePoint(details.localPosition)
+                      : null,
+                  onPanEnd: isDrawer
+                      ? (details) {
+                          _socket.emit('paint', {
+                            'details': null,
+                            'roomName': dataOfRoom['name'] ?? widget.data['name'],
+                          });
+                        }
+                      : null,
+                  child: RepaintBoundary(
+                    child: CustomPaint(
+                      size: Size.infinite,
+                      painter: MyCustomPainter(
+                        pointLists: points,
+                      ),
+                    ),
+                  ),
+                );
+              },
             ),
           ),
         ),
