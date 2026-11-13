@@ -2,7 +2,8 @@ import 'package:flutter/material.dart';
 
 class PlayerScore extends StatelessWidget {
   final List<Map> userData;
-  const PlayerScore(this.userData, {super.key});
+  final VoidCallback? onExitGame;
+  const PlayerScore(this.userData, {super.key, this.onExitGame});
 
   @override
   Widget build(BuildContext context) {
@@ -113,6 +114,57 @@ class PlayerScore extends StatelessWidget {
                   },
                 ),
               ),
+              if (onExitGame != null) ...[
+                Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                  child: SizedBox(
+                    width: double.infinity,
+                    child: OutlinedButton.icon(
+                      style: OutlinedButton.styleFrom(
+                        foregroundColor: const Color(0xFFEF4444),
+                        side: const BorderSide(color: Color(0xFFEF4444)),
+                        padding: const EdgeInsets.symmetric(vertical: 12),
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(12),
+                        ),
+                      ),
+                      onPressed: () {
+                        showDialog(
+                          context: context,
+                          builder: (ctx) => AlertDialog(
+                            backgroundColor: const Color(0xFF1E293B),
+                            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+                            title: const Text('Leave Game?', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
+                            content: const Text(
+                              'Are you sure you want to leave? If you are the host, this will terminate the room and free up the room code for reuse.',
+                              style: TextStyle(color: Color(0xFF94A3B8)),
+                            ),
+                            actions: [
+                              TextButton(
+                                onPressed: () => Navigator.of(ctx).pop(),
+                                child: const Text('Cancel', style: TextStyle(color: Color(0xFF94A3B8))),
+                              ),
+                              ElevatedButton(
+                                style: ElevatedButton.styleFrom(
+                                  backgroundColor: const Color(0xFFEF4444),
+                                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                                ),
+                                onPressed: () {
+                                  Navigator.of(ctx).pop();
+                                  onExitGame?.call();
+                                },
+                                child: const Text('Leave Game', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
+                              ),
+                            ],
+                          ),
+                        );
+                      },
+                      icon: const Icon(Icons.exit_to_app_rounded, size: 18),
+                      label: const Text('Leave Game', style: TextStyle(fontWeight: FontWeight.bold)),
+                    ),
+                  ),
+                ),
+              ],
             ],
           ),
         ),

@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:skribbl_clone/create_room_screen.dart';
 import 'package:skribbl_clone/home_screen.dart';
 import 'package:skribbl_clone/services/sound_service.dart';
 
@@ -240,7 +241,12 @@ class _FinalLeaderboardState extends State<FinalLeaderboard> {
                       ),
                       onPressed: () {
                         Navigator.of(context).pushAndRemoveUntil(
-                          MaterialPageRoute(builder: (context) => const HomeScreen()),
+                          MaterialPageRoute(
+                            builder: (context) => CreateRoomScreen(
+                              initialRoomName: widget.roomName,
+                              initialNickname: widget.nickname,
+                            ),
+                          ),
                           (route) => false,
                         );
                       },

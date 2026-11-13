@@ -5,7 +5,9 @@ import 'package:skribbl_clone/services/sound_service.dart';
 import 'package:skribbl_clone/widgets/custom_text_field.dart';
 
 class CreateRoomScreen extends StatefulWidget {
-  const CreateRoomScreen({super.key});
+  final String? initialRoomName;
+  final String? initialNickname;
+  const CreateRoomScreen({super.key, this.initialRoomName, this.initialNickname});
 
   @override
   State<CreateRoomScreen> createState() => _CreateRoomScreenState();
@@ -20,6 +22,12 @@ class _CreateRoomScreenState extends State<CreateRoomScreen> {
   @override
   void initState() {
     super.initState();
+    if (widget.initialNickname != null) {
+      _nameController.text = widget.initialNickname!;
+    }
+    if (widget.initialRoomName != null) {
+      _roomNameController.text = widget.initialRoomName!;
+    }
     SoundService.instance.playLobbyBgm();
   }
 

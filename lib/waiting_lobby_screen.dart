@@ -8,6 +8,7 @@ class WaitingLobbyScreen extends StatefulWidget {
   final List players;
   final bool isHost;
   final VoidCallback? onStartGameNow;
+  final VoidCallback? onLeaveLobby;
 
   const WaitingLobbyScreen({
     super.key,
@@ -17,6 +18,7 @@ class WaitingLobbyScreen extends StatefulWidget {
     required this.players,
     this.isHost = false,
     this.onStartGameNow,
+    this.onLeaveLobby,
   });
 
   @override
@@ -395,6 +397,24 @@ class _WaitingLobbyScreenState extends State<WaitingLobbyScreen> {
                       ],
                     ),
                   ),
+              ],
+              if (widget.onLeaveLobby != null) ...[
+                const SizedBox(height: 12),
+                TextButton.icon(
+                  onPressed: () {
+                    HapticFeedback.lightImpact();
+                    widget.onLeaveLobby?.call();
+                  },
+                  icon: const Icon(Icons.arrow_back_rounded, color: Color(0xFF94A3B8), size: 18),
+                  label: Text(
+                    widget.isHost ? 'Cancel Room & Return to Menu' : 'Leave Lobby',
+                    style: const TextStyle(
+                      color: Color(0xFF94A3B8),
+                      fontSize: 14,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                ),
               ],
             ],
           ),

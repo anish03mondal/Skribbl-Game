@@ -129,7 +129,7 @@ const RoomAdapter = {
     }
     if (isDbConnected) {
       try {
-        await Room.deleteOne(query);
+        await Room.deleteMany(query);
       } catch (err) {
         console.warn('MongoDB delete error:', err.message);
       }
@@ -243,6 +243,10 @@ async function endTurnAndAdvance(room) {
     room.isGameOver = true;
     await room.save();
     io.to(room.name).emit('show-leaderboard', room.players);
+
+    // Delete room immediately so the room code can be reused instantly for a fresh game
+    console.log(`🏆 Game over in "${room.name}". Room code immediately freed for reuse!`);
+    await RoomAdapter.deleteOne({ name: room.name });
   }
 }
 
@@ -293,31 +297,24 @@ io.on('connection', (socket) => {
     try {
       let existingRoom = await RoomAdapter.findOne({ name });
       if (existingRoom) {
-        // If the room has 0 players, or game is over, or abandoned -> clean it up so code can be reused!
-        const isFinished =
-          existingRoom.isGameOver ||
-          existingRoom.currentRound > existingRoom.maxRounds ||
-          !existingRoom.players ||
-          existingRoom.players.length === 0;
+        // Any time someone wants to create a room with this code:
+        // If the room is over, abandoned, host re-creating, or has <= 1 player, clean it up!
+        const isLeader = existingRoom.nickname === nickname;
+        const onlinePlayers = existingRoom.players ? existingRoom.players.filter((p) => p.isOnline !== false) : [];
+        const isAbandoned = onlinePlayers.length <= 1;
 
-        if (isFinished) {
-          console.log(`♻️ Cleaning up finished/empty room "${name}" for fresh game`);
+        if (
+          existingRoom.isGameOver ||
+          isLeader ||
+          isAbandoned ||
+          !existingRoom.players ||
+          existingRoom.players.length <= 1 ||
+          existingRoom.currentRound > existingRoom.maxRounds
+        ) {
+          console.log(`♻️ Cleaning up previous/finished room "${name}" to allow immediate reuse`);
           await RoomAdapter.deleteOne({ name });
           existingRoom = null;
         } else {
-          // If the party leader is reconnecting after temporary network drop
-          const existingPlayer = existingRoom.players.find((p) => p.nickname === nickname);
-          if (existingPlayer) {
-            console.log(`🔄 Leader "${nickname}" reconnecting to room "${name}"`);
-            existingPlayer.socketID = socket.id;
-            socket.join(name);
-            await existingRoom.save();
-            socket.emit('updateRoom', existingRoom);
-            if (existingRoom.word && !existingRoom.isChoosingWord) {
-              socket.emit('round-started', { word: existingRoom.word, room: existingRoom });
-            }
-            return;
-          }
           socket.emit(
             'notCorrectGame',
             'A game with this room code is currently in progress. Please choose another code or wait for it to finish.'
@@ -658,15 +655,27 @@ io.on('connection', (socket) => {
       let room = await RoomAdapter.findOne({ name: roomName });
       if (!room) return;
 
+      const playerWhoLeft = room.players.find((p) => p.nickname === nickname || p.socketID === socket.id);
+      const isLeader = playerWhoLeft ? (playerWhoLeft.isPartyLeader || room.nickname === nickname) : false;
+
       const idx = room.players.findIndex((p) => p.nickname === nickname || p.socketID === socket.id);
       if (idx !== -1) {
         room.players.splice(idx, 1);
       }
       socket.leave(roomName);
 
-      if (room.players.length === 0 || room.isGameOver) {
-        console.log(`🧹 Room "${roomName}" cleaned up on player leave.`);
+      // If the host leaves, OR no players left, OR game is over, OR active game drops below 2 players:
+      // The game cannot continue. Terminate the room and delete immediately so code is free!
+      const shouldTerminate =
+        room.players.length === 0 ||
+        room.isGameOver ||
+        isLeader ||
+        (!room.isJoin && room.players.length < 2);
+
+      if (shouldTerminate) {
+        console.log(`🧹 Room "${roomName}" terminated and deleted (host left or insufficient players). Freeing room code.`);
         await RoomAdapter.deleteOne({ name: roomName });
+        socket.broadcast.to(roomName).emit('notCorrectGame', 'Game terminated. Room code has been freed for a new game.');
       } else {
         await room.save();
         socket.broadcast.to(roomName).emit('user-disconnected', room);
@@ -745,6 +754,8 @@ io.on('connection', (socket) => {
             currentRoom.isGameOver = true;
             await currentRoom.save();
             io.to(currentRoom.name).emit('show-leaderboard', currentRoom.players);
+            console.log(`🧹 Game ended / 1 player left in "${room.name}". Deleting room.`);
+            await RoomAdapter.deleteOne({ name: room.name });
           } else {
             await currentRoom.save();
             io.to(currentRoom.name).emit('user-disconnected', currentRoom);

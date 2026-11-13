@@ -742,12 +742,18 @@ class _PaintScreenState extends State<PaintScreen> {
 
     _socket.on('notCorrectGame', (data) {
       if (!mounted) return;
-      // Only navigate away if initial room join failed (never joined game)
-      if (!_hasJoinedRoom && dataOfRoom.isEmpty) {
+      final String msg = data?.toString() ?? 'Room unavailable';
+      final bool isTermination = msg.toLowerCase().contains('terminate') ||
+          msg.toLowerCase().contains('freed') ||
+          msg.toLowerCase().contains('closed') ||
+          msg.toLowerCase().contains('host left');
+
+      if ((!_hasJoinedRoom && dataOfRoom.isEmpty) || isTermination) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: Text(data?.toString() ?? 'Error entering room'),
+            content: Text(msg),
             backgroundColor: const Color(0xFFEF4444),
+            duration: const Duration(seconds: 4),
           ),
         );
         Navigator.of(context).pushAndRemoveUntil(
@@ -1721,7 +1727,15 @@ class _PaintScreenState extends State<PaintScreen> {
 
     return Scaffold(
       key: scaffoldKey,
-      drawer: PlayerScore(scoreboard),
+      drawer: PlayerScore(
+        scoreboard,
+        onExitGame: () {
+          Navigator.of(context).pushAndRemoveUntil(
+            MaterialPageRoute(builder: (context) => const HomeScreen()),
+            (route) => false,
+          );
+        },
+      ),
       body: Container(
         decoration: const BoxDecoration(
           gradient: LinearGradient(
@@ -1877,6 +1891,12 @@ class _PaintScreenState extends State<PaintScreen> {
                     isHost: isHost,
                     onStartGameNow: () {
                       _socket.emit('start-game-now', dataOfRoom['name'] ?? widget.data['name']);
+                    },
+                    onLeaveLobby: () {
+                      Navigator.of(context).pushAndRemoveUntil(
+                        MaterialPageRoute(builder: (context) => const HomeScreen()),
+                        (route) => false,
+                      );
                     },
                   )
             : hasConnectionError
